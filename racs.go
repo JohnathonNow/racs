@@ -416,7 +416,7 @@ func projectRoutine(p *project) {
 				logger.Fatal(err)
 			}
 			logger.Infof("Creating task %d:%d", p.id, id)
-			t := &task{id, p.state.String(), "RUNNING", time, nil}
+			t := &task{id, p.state.String(), "RUNNING", time}
 			p.tasks = append(p.tasks, t)
 			if len(p.tasks) > 5 {
 				p.tasks = p.tasks[1:]
@@ -1324,18 +1324,18 @@ func handleProjectBuild(w http.ResponseWriter, r *http.Request, u *user, params 
 	w.Write([]byte("OK"))
 }
 
-func handleTaskStop(w http.ResponseWriter, r *http.Request, u  *user, params map[string]string) {
+func handleTaskStop(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
 	if checkLogin(u, "admin", w, "/task/stop", params) {
 		return
 	}
-	if  params["id"] == "" {
+	if params["id"] == "" {
 		w.WriteHeader(500)
 		w.Write([]byte("Task Id is required"))
 	} else {
 		id, _ := strconv.Atoi(params["id"])
 		if cmd := activeCommands[id]; cmd != nil {
 			if err := cmd.Process.Kill(); err != nil {
-				logger.Warnf("Unable to stop task %d", task.id)
+				logger.Warnf("Unable to stop task %d", id)
 				w.WriteHeader(501)
 				w.Write([]byte("Unable to stop task command"))
 			} else {
@@ -1768,7 +1768,7 @@ func main() {
 		rows.Scan(&pid, &id, &kind, &state, &time)
 		p := projects[pid]
 		if p != nil {
-			p.tasks = append(p.tasks, &task{id, kind, state, time, nil})
+			p.tasks = append(p.tasks, &task{id, kind, state, time})
 			if len(p.tasks) > 5 {
 				p.tasks = p.tasks[1:]
 			}
