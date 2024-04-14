@@ -492,8 +492,10 @@
 				<pre id="task_logs" style="color:black;background:white;white-space:pre-wrap;"/>
 			</section>
 			<footer class="modal-card-foot">
+				<input type="hidden" id="task_id" />
 				<span class="tag is-medium" id="task_status"/>
 				<span style="flex:1 1;"/>
+				<button class="button is-warning is-hidden" onclick="stopTask()" id="stop_btn">Stop</button>
 				<button class="button" onclick="hideTaskLogs()" type="reset">Close</button>
 			</footer>
 		</div>
@@ -687,6 +689,10 @@
 						case "ERROR":
 							task.icon.addClass("fa-exclamation-triangle");
 							task.state.addClass("has-text-danger");
+							break;
+						case "STOPPED":
+							task.icon.addClass("fa-ban");
+							task.state.addClass("has-text-warning");
 							break;
 						}
 						var time = result.time.split(" ");
@@ -924,6 +930,7 @@
 			var modal = document.getElementById("task_log");
 			modal.addClass("is-active");
 			var task = this.id;
+			document.getElementById("task_id").value = task;
 			var container = document.getElementById("task_logs");
 			var section = document.getElementById("task_section");
 			var tag = document.getElementById("task_status");
@@ -934,19 +941,33 @@
 					var state = response.headers.get("X-Task-State");
 					tag.textContent = state;
 					tag.classList = "tag is-medium";
+					let stop_btn = document.getElementById("stop_btn");
 					switch (state) {
 					case "RUNNING":
 						tag.addClass("is-info");
+						stop_btn.classList.remove("is-hidden");
+						stop_btn.addClass("is-block");
 						break;
 					case "SUCCESS":
 						tag.addClass("is-success");
 						clearInterval(taskInterval);
 						taskInterval = null;
+						stop_btn.classList.remove("is-block");
+						stop_btn.addClass("is-hidden");
 						break;
 					case "ERROR":
 						tag.addClass("is-danger");
 						clearInterval(taskInterval);
 						taskInterval = null;
+						stop_btn.classList.remove("is-block");
+						stop_btn.addClass("is-hidden");
+						break;
+					case "STOPPED":
+						tag.addClass("is-warning");
+						clearInterval(taskInterval);
+						taskInterval = null;
+						stop_btn.classList.remove("is-block");
+						stop_btn.addClass("is-hidden");
 						break;
 					}
 					response.text().then(text => {
@@ -966,6 +987,13 @@
 			if (taskInterval !== null) {
 				clearInterval(taskInterval);
 				taskInterval = null;
+			}
+		}
+
+		function stopTask() {
+			if (document.getElementById("task_status").innerText === "RUNNING") {
+				let taskId = document.getElementById("task_id").value;
+				fetch(`/task/stop?id=${taskId}`).then(response => {});
 			}
 		}
 
@@ -1001,6 +1029,7 @@
 			project.state.removeClass("is-info");
 			project.state.removeClass("is-success");
 			project.state.removeClass("is-danger");
+			project.state.removeClass("is-warning");
 			switch (result.state) {
 			case "RUNNING":
 				project.state.addClass("is-info");
@@ -1017,6 +1046,11 @@
 				project.state.addClass("is-danger");
 				task.icon.addClass("fa-exclamation-triangle");
 				task.state.addClass("has-text-danger");
+				break;
+			case "STOPPED":
+				project.state.addClass("is-warning");
+				task.icon.addClass("fa-ban");
+				task.state.addClass("has-text-warning");
 				break;
 			}
 			var container = project.tasks; /*.parentNode;*/
