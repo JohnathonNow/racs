@@ -555,9 +555,7 @@ func projectRoutine(p *project) {
 				request = <-p.queue
 			}
 		case DELETE_SUCCESS:
-			db.Exec(`DELETE FROM projects WHERE id = ?`, p.id)
-			db.Exec(`DELETE FROM tasks WHERE project = ?`, p.id)
-			delete(projects, p.id)
+			projectDelete(p)
 			return
 		default:
 			request = <-p.queue
@@ -605,6 +603,34 @@ func projectCreate(name, url, branch, labels string) *project {
 		"tagRepo":        p.tagRepo,
 	})
 	return p
+}
+
+func projectDelete(p *project) {
+	for _, trigger := range p.triggers {
+		switch trigger.state {
+		case PREPARING:
+			trigger.project.prepareDep = nil
+		case PREPACKAGING:
+			trigger.project.prepackageDep = nil
+		case PACKAGING:
+			trigger.project.packageDep = nil
+		case SCANNING:
+			scanners := trigger.project.scanners
+			for n, q := range scanners {
+				if p == q {
+					trigger.project.scanners = append(scanners[:n], scanners[n+1:]...)
+					break
+				}
+			}
+		}
+	}
+	db.Exec(`DELETE FROM projects WHERE id = ?`, p.id)
+	db.Exec(`DELETE FROM tasks WHERE project = ?`, p.id)
+	db.Exec(`DELETE FROM triggers WHERE project = ?`, p.id)
+	db.Exec(`DELETE FROM triggers WHERE target = ?`, p.id)
+	db.Exec(`DELETE FROM destinations WHERE project = ?`, p.id)
+	db.Exec(`DELETE FROM environments WHERE project = ?`, p.id)
+	delete(projects, p.id)
 }
 
 var staticPath, _ = filepath.Abs("static")
@@ -1545,6 +1571,8 @@ func handleAction(path string, w http.ResponseWriter, r *http.Request, u *user, 
 	}
 }
 
+var templates *template.Template
+
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	logger.Infof("%s %s %s", r.Method, r.RemoteAddr, path)
@@ -1581,7 +1609,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	if noLogin {
 		u.Name = "user"
 	}
-	cookie, err := r.Cookie("RACS_TOKEN")
+	cookie, _ := r.Cookie("RACS_TOKEN")
 	if cookie != nil {
 		b, _ := hex.DecodeString(cookie.Value)
 		gcm, _ := cipher.NewGCM(ciph)
@@ -1608,13 +1636,15 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	default:
 		contentType = ""
 	}
-	content, err := loadStatic(path)
-	if err != nil {
-		w.WriteHeader(404)
-		w.Write([]byte("Not found"))
-	} else {
+	if template := templates.Lookup(path[1:]); template != nil {
+		w.Header().Add("Content-Type", contentType)
+		template.Execute(w, nil)
+	} else if content, err := loadStatic(path); err == nil {
 		w.Header().Add("Content-Type", contentType)
 		w.Write(content)
+	} else {
+		w.WriteHeader(404)
+		w.Write([]byte("Not found"))
 	}
 }
 
@@ -1834,6 +1864,8 @@ func main() {
 			time.Sleep(60 * time.Second)
 		}
 	}()
+
+	templates, _ = template.ParseGlob("templates/*")
 
 	handlers["/events"] = handleEvents
 	handlers["/user/current"] = handleUserCurrent
