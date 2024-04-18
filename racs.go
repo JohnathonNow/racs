@@ -1716,6 +1716,7 @@ func main() {
 	for state := DELETING; state <= TAG_SUCCESS; state += 1 {
 		states[state.String()] = state
 	}
+	db.Exec(`UPDATE tasks SET state = 'STOPPED' WHERE state = 'RUNNING'`)
 	rows, err := db.Query(`SELECT id, name, url, user, password, timeout FROM registries`)
 	for rows.Next() {
 		var id int
