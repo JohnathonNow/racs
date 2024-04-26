@@ -519,9 +519,18 @@ func projectRoutine(p *project) {
 				"id":      p.id,
 				"version": p.version,
 			})
-			_, err = exec.Command("git", "-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "tag", fmt.Sprintf("r%d", p.version)).Output()
-			if err != nil {
-				logger.Error(err)
+
+			tags := make(map[string]int)
+			for _, destination := range p.destinations {
+				tag := strings.Replace(destination.tag, "$VERSION", strconv.Itoa(p.version), -1)
+				tag = tag[strings.LastIndex(tag, ":")+1:]
+				tags[tag] = 1
+			}
+			for tag, _ := range tags {
+				_, err = exec.Command("git", "-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "tag", tag).Output()
+				if err != nil {
+					logger.Error(err)
+				}
 			}
 			request = taskRequest{SCANNING, request.from, request.trigger, 0}
 		case SCAN_SUCCESS:
