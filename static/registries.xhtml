@@ -192,7 +192,7 @@
 			</div>
 		</div>
 	</nav>
-	<div style="display:flex;flex-wrap:wrap;" id="registries"/>
+	<table class="table" style="margin:auto;" id="registries"/>
 	<script type="text/javascript">
 		let burger = document.getElementById("navbar-burger");
 		burger.onclick = function(event) {
@@ -254,14 +254,11 @@
 			if (!registry) {
 				registry = registries[result.id] = {};
 				registry.name = result.name;
-				var card = create("div.card.p-1.m-1.is-flex.is-flex-wrap-nowrap",
-					{style: "flex-grow: 1; flex-basis: 0;"},
-					create("span.is-flex-grow-1", {style: "display:inline-block"},
-						create("div.mb-2.has-text-weight-bold.is-size-6", result.name),
-						create("div",
-							create("button.button.is-small", {"on-click": showSettings.bind(result)},
-								create("span.icon", create("i.fas.fa-tools"))
-							)
+				var card = create("tr",
+					create("th", result.name),
+					create("td",
+						create("button.button.is-small", {"on-click": showSettings.bind(result)},
+							create("span.icon", create("i.fas.fa-tools"))
 						)
 					)
 				);
