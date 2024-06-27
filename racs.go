@@ -127,6 +127,7 @@ type taskRequest struct {
 	from    state
 	trigger *taskTrigger
 	index   int
+	force   bool
 }
 
 type credential struct {
@@ -141,8 +142,8 @@ type destination struct {
 }
 
 type trigger struct {
-	project *project
-	state   state
+	from   state
+	states map[state]bool
 }
 
 type project struct {
@@ -162,7 +163,7 @@ type project struct {
 	destinations   []destination
 	tasks          []*task
 	queue          chan taskRequest
-	triggers       []trigger
+	triggers       map[*project]trigger
 	credentials    map[string]*credential
 	prepareDep     *project
 	prepackageDep  *project
@@ -230,8 +231,8 @@ func registryLogin(r *registry) string {
 	return r.url
 }
 
-func (p *project) buildFrom(state state, trigger *taskTrigger) {
-	p.queue <- taskRequest{state, state, trigger, 0}
+func (p *project) buildFrom(state state, trigger *taskTrigger, force bool) {
+	p.queue <- taskRequest{state, state, trigger, 0, force}
 }
 
 func projectEnvironment(p *project, request taskRequest) string {
@@ -314,10 +315,14 @@ func projectRoutine(p *project) {
 			if p.prepackageSpec != "" {
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
+				cache_ttl := "24h"
+				if request.force {
+					cache_ttl = "0"
+				}
 				args = []string{"build",
 					"--pull=newer",
 					"--layers",
-					"--cache-ttl=24h",
+					fmt.Sprintf("--cache-ttl=%s", cache_ttl),
 					"-f", spec,
 					"-t", fmt.Sprintf("prepackage-%d", p.id),
 				}
@@ -474,13 +479,13 @@ func projectRoutine(p *project) {
 		logger.Infof("Project %d finished task %s", p.id, state.String())
 		switch p.state {
 		case CREATE_SUCCESS:
-			request = taskRequest{CLEANING, request.from, request.trigger, 0}
+			request = taskRequest{CLEANING, request.from, request.trigger, 0, false}
 		case CLEAN_SUCCESS:
-			request = taskRequest{CLONING, request.from, request.trigger, 0}
+			request = taskRequest{CLONING, request.from, request.trigger, 0, false}
 		case CLONE_SUCCESS:
-			request = taskRequest{PREPARING, request.from, request.trigger, 0}
+			request = taskRequest{PREPARING, request.from, request.trigger, 0, false}
 		case PREPARE_SUCCESS:
-			request = taskRequest{PULLING, request.from, request.trigger, 0}
+			request = taskRequest{PULLING, request.from, request.trigger, 0, false}
 		case PULL_SUCCESS:
 			buildHash := []byte{}
 			f, err := os.Open(fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec))
@@ -495,18 +500,18 @@ func projectRoutine(p *project) {
 			if !bytes.Equal(buildHash, p.buildHash) {
 				p.buildHash = buildHash
 				db.Exec(`UPDATE projects SET buildHash = ? WHERE id = ?`, buildHash, p.id)
-				request = taskRequest{PREPARING, request.from, request.trigger, 0}
+				request = taskRequest{PREPARING, request.from, request.trigger, 0, false}
 			} else {
 				if !p.protected || request.trigger == nil {
-					request = taskRequest{BUILDING, request.from, request.trigger, 0}
+					request = taskRequest{BUILDING, request.from, request.trigger, 0, false}
 				} else {
 					request = <-p.queue
 				}
 			}
 		case BUILD_SUCCESS:
-			request = taskRequest{PREPACKAGING, request.from, request.trigger, 0}
+			request = taskRequest{PREPACKAGING, request.from, request.trigger, 0, false}
 		case PREPACKAGE_SUCCESS:
-			request = taskRequest{PACKAGING, request.from, request.trigger, 0}
+			request = taskRequest{PACKAGING, request.from, request.trigger, 0, false}
 		case PACKAGE_SUCCESS:
 			out, err := exec.Command("git", "-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "rev-parse", "HEAD").Output()
 			if err == nil {
@@ -532,17 +537,17 @@ func projectRoutine(p *project) {
 					logger.Error(err)
 				}
 			}
-			request = taskRequest{SCANNING, request.from, request.trigger, 0}
+			request = taskRequest{SCANNING, request.from, request.trigger, 0, false}
 		case SCAN_SUCCESS:
 			index := request.index + 1
 			if index < len(p.scanners) {
-				request = taskRequest{SCANNING, request.from, request.trigger, index}
+				request = taskRequest{SCANNING, request.from, request.trigger, index, false}
 			} else {
-				request = taskRequest{PUSHING, request.from, request.trigger, 0}
+				request = taskRequest{PUSHING, request.from, request.trigger, 0, false}
 			}
 		case PUSH_SUCCESS:
 			index := request.index
-			if request.from != SCANNING && len(p.triggers) > 0 {
+			if (request.from != SCANNING || request.force) && len(p.triggers) > 0 {
 				tag := ""
 				registry := ""
 				if index < len(p.destinations) {
@@ -551,15 +556,15 @@ func projectRoutine(p *project) {
 					registry = destination.registry.name
 				}
 				taskTrigger := &taskTrigger{p.url, p.branch, p.commit, tag, registry, p.id, p.version}
-				for _, trigger := range p.triggers {
-					trigger.project.buildFrom(trigger.state, taskTrigger)
+				for target, trigger := range p.triggers {
+					target.buildFrom(trigger.from, taskTrigger, false)
 				}
 			}
-			request = taskRequest{TAGGING, request.state, request.trigger, index}
+			request = taskRequest{TAGGING, request.state, request.trigger, index, false}
 		case TAG_SUCCESS:
 			index := request.index + 1
 			if request.from != SCANNING && index < len(p.destinations) {
-				request = taskRequest{PUSHING, request.state, request.trigger, index}
+				request = taskRequest{PUSHING, request.state, request.trigger, index, false}
 			} else {
 				request = <-p.queue
 			}
@@ -590,7 +595,7 @@ func projectCreate(name, url, branch, labels string) *project {
 		make([]destination, 0),
 		make([]*task, 0),
 		make(chan taskRequest, 10),
-		make([]trigger, 0),
+		make(map[*project]trigger),
 		make(map[string]*credential),
 		nil, nil, nil, make([]*project, 0), "",
 	}
@@ -615,20 +620,22 @@ func projectCreate(name, url, branch, labels string) *project {
 }
 
 func projectDelete(p *project) {
-	for _, trigger := range p.triggers {
-		switch trigger.state {
-		case PREPARING:
-			trigger.project.prepareDep = nil
-		case PREPACKAGING:
-			trigger.project.prepackageDep = nil
-		case PACKAGING:
-			trigger.project.packageDep = nil
-		case SCANNING:
-			scanners := trigger.project.scanners
-			for n, q := range scanners {
-				if p == q {
-					trigger.project.scanners = append(scanners[:n], scanners[n+1:]...)
-					break
+	for target, trigger := range p.triggers {
+		for state := range trigger.states {
+			switch state {
+			case PREPARING:
+				target.prepareDep = nil
+			case PREPACKAGING:
+				target.prepackageDep = nil
+			case PACKAGING:
+				target.packageDep = nil
+			case SCANNING:
+				scanners := target.scanners
+				for n, q := range scanners {
+					if p == q {
+						target.scanners = append(scanners[:n], scanners[n+1:]...)
+						break
+					}
 				}
 			}
 		}
@@ -671,10 +678,10 @@ func projectList() []map[string]interface{} {
 			})
 		}
 		triggers := make([]interface{}, 0)
-		for _, trigger := range p.triggers {
-			triggers = append(triggers, []interface{}{
-				trigger.project.id, trigger.state.String(),
-			})
+		for target, trigger := range p.triggers {
+			for state := range trigger.states {
+				triggers = append(triggers, []interface{}{target.id, state.String()})
+			}
 		}
 		environment := make([]interface{}, 0)
 		for name, credential := range p.credentials {
@@ -895,10 +902,12 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 	}
 	for _, p := range projects {
 		pnode := nodes[p.id]
-		for _, t := range p.triggers {
-			tnode := nodes[t.project.id]
-			edge, _ := graph.CreateEdge("", pnode, tnode)
-			edge.SetXLabel(t.state.String())
+		for q, t := range p.triggers {
+			for s := range t.states {
+				tnode := nodes[q.id]
+				edge, _ := graph.CreateEdge("", pnode, tnode)
+				edge.SetXLabel(s.String())
+			}
 		}
 	}
 
@@ -963,10 +972,10 @@ func projectUpdateEvent(p *project) {
 		})
 	}
 	triggers := make([]interface{}, 0)
-	for _, trigger := range p.triggers {
-		triggers = append(triggers, []interface{}{
-			trigger.project.id, trigger.state.String(),
-		})
+	for target, trigger := range p.triggers {
+		for state := range trigger.states {
+			triggers = append(triggers, []interface{}{target.id, state.String()})
+		}
 	}
 	environment := make([]interface{}, 0)
 	for name, credential := range p.credentials {
@@ -1182,25 +1191,27 @@ func handleProjectTriggers(w http.ResponseWriter, r *http.Request, u *user, para
 	}
 	pid, _ := strconv.Atoi(params["id"])
 	p := projects[pid]
-	for _, trigger := range p.triggers {
-		switch trigger.state {
-		case PREPARING:
-			trigger.project.prepareDep = nil
-		case PREPACKAGING:
-			trigger.project.prepackageDep = nil
-		case PACKAGING:
-			trigger.project.packageDep = nil
-		case SCANNING:
-			scanners := trigger.project.scanners
-			for n, q := range scanners {
-				if p == q {
-					trigger.project.scanners = append(scanners[:n], scanners[n+1:]...)
-					break
+	for target, trigger := range p.triggers {
+		for state := range trigger.states {
+			switch state {
+			case PREPARING:
+				target.prepareDep = nil
+			case PREPACKAGING:
+				target.prepackageDep = nil
+			case PACKAGING:
+				target.packageDep = nil
+			case SCANNING:
+				scanners := target.scanners
+				for n, q := range scanners {
+					if p == q {
+						target.scanners = append(scanners[:n], scanners[n+1:]...)
+						break
+					}
 				}
 			}
 		}
 	}
-	p.triggers = make([]trigger, 0)
+	p.triggers = make(map[*project]trigger, 0)
 	db.Exec(`DELETE FROM triggers WHERE project = ?`, p.id)
 	triggers := strings.FieldsFunc(params["triggers"], func(c rune) bool {
 		return c == ','
@@ -1223,19 +1234,35 @@ func handleProjectTriggers(w http.ResponseWriter, r *http.Request, u *user, para
 			s = BUILDING
 		case "prepackage":
 			s = PREPACKAGING
-			t.prepackageDep = p
 		case "package":
 			s = PACKAGING
-			t.packageDep = p
 		case "scan":
 			s = SCANNING
-			t.scanners = append(t.scanners, p)
 		case "push":
 			s = PUSHING
 		case "tag":
 			s = TAGGING
 		}
-		p.triggers = append(p.triggers, trigger{t, s})
+		trigger, exists := p.triggers[t]
+		if !exists {
+			trigger.from = s
+			trigger.states = make(map[state]bool, 0)
+		}
+		trigger.states[s] = true
+		if s < trigger.from {
+			trigger.from = s
+		}
+		p.triggers[t] = trigger
+		switch s {
+		case PREPARING:
+			t.prepareDep = p
+		case PREPACKAGING:
+			t.prepackageDep = p
+		case PACKAGING:
+			t.packageDep = p
+		case SCANNING:
+			t.scanners = append(t.scanners, p)
+		}
 		db.Exec(`INSERT INTO triggers(project, target, state) VALUES(?, ?, ?)`, p.id, t.id, s.String())
 	}
 	projectUpdateEvent(p)
@@ -1332,25 +1359,25 @@ func handleProjectBuild(w http.ResponseWriter, r *http.Request, u *user, params 
 	if requestedRef == expectedRef {
 		switch stage {
 		case "clean":
-			p.buildFrom(CLEANING, nil)
+			p.buildFrom(CLEANING, nil, true)
 		case "clone":
-			p.buildFrom(CLONING, nil)
+			p.buildFrom(CLONING, nil, true)
 		case "prepare":
-			p.buildFrom(PREPARING, nil)
+			p.buildFrom(PREPARING, nil, true)
 		case "pull":
-			p.buildFrom(PULLING, nil)
+			p.buildFrom(PULLING, nil, true)
 		case "build":
-			p.buildFrom(BUILDING, nil)
+			p.buildFrom(BUILDING, nil, true)
 		case "prepackage":
-			p.buildFrom(PREPACKAGING, nil)
+			p.buildFrom(PREPACKAGING, nil, true)
 		case "package":
-			p.buildFrom(PACKAGING, nil)
+			p.buildFrom(PACKAGING, nil, true)
 		case "scan":
-			p.buildFrom(SCANNING, nil)
+			p.buildFrom(SCANNING, nil, true)
 		case "push":
-			p.buildFrom(PUSHING, nil)
+			p.buildFrom(PUSHING, nil, true)
 		case "tag":
-			p.buildFrom(TAGGING, nil)
+			p.buildFrom(TAGGING, nil, true)
 		}
 	} else {
 		logger.Infof("Build requested by %s expected %s, skipping", requestedRef, expectedRef)
@@ -1391,7 +1418,7 @@ func handleProjectDelete(w http.ResponseWriter, r *http.Request, u *user, params
 	id, _ := strconv.Atoi(params["id"])
 	confirm := params["confirm"]
 	if confirm == "YES" {
-		projects[id].buildFrom(DELETING, nil)
+		projects[id].buildFrom(DELETING, nil, true)
 	}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
@@ -1771,7 +1798,7 @@ func main() {
 			make([]destination, 0),
 			make([]*task, 0),
 			make(chan taskRequest, 10),
-			make([]trigger, 0),
+			make(map[*project]trigger),
 			make(map[string]*credential),
 			nil, nil, nil, make([]*project, 0), "",
 		}
@@ -1823,8 +1850,18 @@ func main() {
 		p := projects[pid]
 		t := projects[tid]
 		if p != nil && t != nil {
-			p.triggers = append(p.triggers, trigger{t, states[stateName]})
-			switch states[stateName] {
+			s := states[stateName]
+			trigger, exists := p.triggers[t]
+			if !exists {
+				trigger.from = s
+				trigger.states = make(map[state]bool, 0)
+			}
+			trigger.states[s] = true
+			if s < trigger.from {
+				trigger.from = s
+			}
+			p.triggers[t] = trigger
+			switch s {
 			case PREPARING:
 				t.prepareDep = p
 			case PREPACKAGING:

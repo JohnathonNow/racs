@@ -133,6 +133,20 @@
 		.modal-card-body {
 			height: 30em;
 		}
+
+		th.rotate {
+			height: 6.5em;
+			white-space: nowrap;
+		}
+
+		th.rotate > div {
+			transform: translate(-3px, 51px) rotate(270deg);
+			width: 20px;
+		}
+
+		th.rotate > div > div {
+			width: 6em;
+		}
 	</style>
 </head>
 <body class="has-background-warning-light" style="min-height:100vh;padding:0;">
@@ -406,6 +420,16 @@
 						<input type="hidden" name="id" id="trigger_id" value=""/>
 						<input type="hidden" name="triggers" id="trigger_triggers" value=""/>
 						<table class="table is-fullwidth">
+							<thead class="has-background-link" style="position:sticky;top:0;">
+								<th style="vertical-align:bottom;">Project</th>
+								<th class="rotate"><div><div>Clean</div></div></th>
+								<th class="rotate"><div><div>Prepare</div></div></th>
+								<th class="rotate"><div><div>Pull</div></div></th>
+								<th class="rotate"><div><div>Build</div></div></th>
+								<th class="rotate"><div><div>Prepackage</div></div></th>
+								<th class="rotate"><div><div>Package</div></div></th>
+								<th class="rotate"><div><div>Scan</div></div></th>
+							</thead>
 							<tbody id="trigger_table"/>
 						</table>
 					</section>
@@ -819,35 +843,40 @@
 			document.getElementById("destination_destinations").value = value;
 		}
 
+		const triggerStates = ["clean", "prepare", "pull", "build", "prepackage", "package", "scan"];
+
 		function addTrigger(target, stage) {
 			var triggers = document.getElementById("trigger_table");
-			var targetSelect = create("select",
-				create("option", {value: ""}, "--- Project ---"),
-				projects.map((project, id) => create("option", {value: id}, project.name))
-			);
-			var stageSelect = create("select",
-				create("option", {value: "none"}, "--- Stage ---"),
-				create("option", {value: "clean"}, "Clean"),
-				create("option", {value: "clone"}, "Clone"),
-				create("option", {value: "prepare"}, "Prepare"),
-				create("option", {value: "pull"}, "Pull"),
-				create("option", {value: "build"}, "Build"),
-				create("option", {value: "prepackage"}, "Prepackage"),
-				create("option", {value: "package"}, "Package"),
-				create("option", {value: "scan"}, "Scan"),
-				create("option", {value: "push"}, "Push"),
-				create("option", {value: "tag"}, "Tag")
-			);
-			if (target) targetSelect.value = target;
-			if (stage) stageSelect.value = stage;
-			var row = create("tr",
-				create("td", create("div.select", targetSelect)),
-				create("td", create("div.select", stageSelect)),
-				create("td", create("span.button.is-danger", {"on-click": remove}, "Remove"))
-			);
-			triggers.appendChild(row);
-			function remove() {
-				triggers.removeChild(row);
+			var row = null;
+			if (target) triggers.childNodes.forEach(child => {
+				let project = child.children[0].children[0].children[0].value;
+				if (project == target) row = child;
+			});
+			if (!row) {
+				var targetSelect = create("select",
+					create("option", {value: ""}, "--- Project ---"),
+					projects.map((project, id) => create("option", {value: id}, project.name))
+				);
+				row = create("tr",
+					create("td", create("div.select", targetSelect)),
+					/*create("td", create("div.select", stageSelect)),
+					create("td", create("span.button.is-danger", {"on-click": remove}, "Remove")),*/
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"}))
+				);
+				triggers.appendChild(row);
+				function remove() {
+					triggers.removeChild(row);
+				}
+				if (target) targetSelect.value = target;
+			}
+			if (stage) {
+				row.children[triggerStates.indexOf(stage) + 1].children[0].checked = true;
 			}
 		}
 
@@ -855,10 +884,18 @@
 			var triggers = document.getElementById("trigger_table");
 			var value = [];
 			triggers.childNodes.forEach(child => {
-				if (child.children[0].children[0].children[0].value !== "") value.push([
+				let project = child.children[0].children[0].children[0].value;
+				if (project != "") {
+					triggerStates.forEach((state, i) => {
+						if (child.children[i + 1].children[0].checked) {
+							value.push([project, state]);
+						}
+					});
+				}
+				/*if (child.children[0].children[0].children[0].value !== "") value.push([
 					child.children[0].children[0].children[0].value,
 					child.children[1].children[0].children[0].value
-				]);
+				]);*/
 			});
 			document.getElementById("trigger_triggers").value = value;
 		}
