@@ -906,7 +906,13 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			for s := range t.states {
 				tnode := nodes[q.id]
 				edge, _ := graph.CreateEdge("", pnode, tnode)
-				edge.SetXLabel(s.String())
+				label := edge.Get("xlabel")
+				if label != "" {
+					label = fmt.Sprintf("%s, %s", label, s.String())
+				} else {
+					label = s.String()
+				}
+				edge.SetXLabel(label)
 			}
 		}
 	}
