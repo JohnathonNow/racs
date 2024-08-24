@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -31,6 +32,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/msteinert/pam"
 	"github.com/withmandala/go-log"
+	"golang.org/x/sync/semaphore"
 )
 
 var logger = log.New(os.Stderr)
@@ -256,6 +258,8 @@ func projectEnvironment(p *project, request taskRequest) string {
 	return filename
 }
 
+var jobSemaphore *semaphore.Weighted
+
 func projectRoutine(p *project) {
 	os.Mkdir(fmt.Sprintf("%s/%d/context", projectAbs, p.id), 0777)
 	os.Mkdir(fmt.Sprintf("%s/%d/workspace", projectAbs, p.id), 0777)
@@ -416,12 +420,12 @@ func projectRoutine(p *project) {
 			var id int
 			var time string
 			err := db.QueryRow(`INSERT INTO tasks(project, type, state, time)
-				VALUES(?, ?, 'RUNNING', datetime('now')) RETURNING id, time`, p.id, p.state.String()).Scan(&id, &time)
+				VALUES(?, ?, 'QUEUED', datetime('now')) RETURNING id, time`, p.id, p.state.String()).Scan(&id, &time)
 			if err != nil {
 				logger.Fatal(err)
 			}
 			logger.Infof("Creating task %d:%d", p.id, id)
-			t := &task{id, p.state.String(), "RUNNING", time}
+			t := &task{id, p.state.String(), "QUEUED", time}
 			p.tasks = append(p.tasks, t)
 			if len(p.tasks) > 5 {
 				p.tasks = p.tasks[1:]
@@ -432,6 +436,16 @@ func projectRoutine(p *project) {
 				"id":      t.id,
 				"type":    t.kind,
 				"time":    t.time,
+				"state":   "QUEUED",
+			})
+			ctx := context.TODO()
+			jobSemaphore.Acquire(ctx, 1)
+			t.state = "RUNNING"
+			db.Exec(`UPDATE tasks SET state = ? WHERE id = ?`, t.state, t.id)
+			event(map[string]interface{}{
+				"event":   "task/state",
+				"project": p.id,
+				"id":      t.id,
 				"state":   "RUNNING",
 			})
 			taskRoot := fmt.Sprintf("tasks/%d", t.id)
@@ -448,6 +462,7 @@ func projectRoutine(p *project) {
 			cmd.Stdout = out
 			cmd.Stderr = out
 			err = cmd.Run()
+			jobSemaphore.Release(1)
 			if err != nil {
 				if err.Error() == "signal: killed" {
 					t.state = "STOPPED"
@@ -1693,16 +1708,19 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 func main() {
 	var sslCert, sslKey string
 	var port int
+	var limit int64
 	flag.StringVar(&sslCert, "ssl-cert", "", "SSL cert")
 	flag.StringVar(&sslKey, "ssl-key", "", "SSL key")
 	flag.BoolVar(&noLogin, "no-login", false, "Allow all actions without login")
 	flag.IntVar(&port, "port", 8080, "Web server port")
+	flag.Int64Var(&limit, "limit", 8, "Job limit")
 	flag.Parse()
 
 	gv = graphviz.New()
 	key := make([]byte, 32)
 	rand.Read(key)
 	ciph, _ = aes.NewCipher(key)
+	jobSemaphore = semaphore.NewWeighted(limit)
 
 	var err error
 

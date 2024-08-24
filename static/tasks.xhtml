@@ -239,6 +239,9 @@
 					tag.textContent = state;
 					tag.classList = "tag is-medium";
 					switch (state) {
+					case "QUEUED":
+						tag.addClass("is-text");
+						break;
 					case "RUNNING":
 						tag.addClass("is-info");
 						break;
@@ -365,24 +368,24 @@
 			task.icon.classList = "fas";
 			task.box.classList = "task notification m-1 p-1 is-light";
 			switch (result.state) {
+			case "QUEUED":
+				task.box.addClass("is-text");
+				task.icon.addClass("fa-hourglass-start")
+				break;
 			case "RUNNING":
-				//project.card.addClass("running");
 				task.box.addClass("is-info");
 				task.icon.addClass("fa-spinner");
 				task.icon.addClass("fa-spin");
 				break;
 			case "SUCCESS":
-				//project.card.addClass("success");
 				task.box.addClass("is-success");
 				task.icon.addClass("fa-check-square");
 				break;
 			case "ERROR":
-				//project.card.addClass("error");
 				task.box.addClass("is-danger");
 				task.icon.addClass("fa-exclamation-triangle");
 				break;
 			case "STOPPED":
-				//project.card.addClass("error");
 				task.box.addClass("is-warning");
 				task.icon.addClass("fa-ban");
 				break;

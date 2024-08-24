@@ -697,6 +697,10 @@
 						task.icon = create("i.fa");
 						task.state = create("span.icon", task.icon);
 						switch (result.state) {
+						case "QUEUED":
+							task.icon.addClass("fa-hourglass-start");
+							task.state.addClass("has-text-grey");
+							break;
 						case "RUNNING":
 							task.icon.addClass("fa-cog");
 							task.icon.addClass("fa-spin");
@@ -976,6 +980,11 @@
 					tag.classList = "tag is-medium";
 					let stop_btn = document.getElementById("stop_btn");
 					switch (state) {
+					case "QUEUED":
+						tag.addClass("is-white");
+						stop_btn.classList.remove("is-block");
+						stop_btn.addClass("is-hidden");
+						break;
 					case "RUNNING":
 						tag.addClass("is-info");
 						stop_btn.classList.remove("is-hidden");
@@ -1064,6 +1073,11 @@
 			project.state.removeClass("is-danger");
 			project.state.removeClass("is-warning");
 			switch (result.state) {
+			case "QUEUED":
+				project.state.addClass("is-text");
+				task.icon.addClass("fa-hourglass-start");
+				task.state.addClass("has-text-grey");
+				break;
 			case "RUNNING":
 				project.state.addClass("is-info");
 				task.icon.addClass("fa-cog");
