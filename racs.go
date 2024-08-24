@@ -1716,6 +1716,8 @@ func main() {
 	flag.Int64Var(&limit, "limit", 8, "Job limit")
 	flag.Parse()
 
+	logger.Infof("Set job limit to %d", limit)
+
 	gv = graphviz.New()
 	key := make([]byte, 32)
 	rand.Read(key)
