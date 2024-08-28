@@ -1330,80 +1330,82 @@ func handleProjectEnvironment(w http.ResponseWriter, r *http.Request, u *user, p
 	}
 }
 
-func findProject(ref string, repo map[string]interface{}) *project {
+func findProjects(ps []*project, ref string, repo map[string]interface{}) []*project {
 	logger.Infof("Trying to match project %v, %v", ref, repo)
 	for _, p := range projects {
 		if p.url == repo["clone_url"] || p.url == repo["html_url"] || p.url == repo["ssh_url"] {
 			if fmt.Sprintf("refs/heads/%s", p.branch) == ref {
-				return p
+				ps = append(ps, p)
 			}
 		}
 	}
-	return nil
+	return ps
 }
 
 func handleProjectBuild(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
-	var p *project
+	var ps []*project
 	if params["id"] != "" {
 		id, _ := strconv.Atoi(params["id"])
-		p = projects[id]
+		ps = append(ps, projects[id])
 	} else if params["payload"] != "" {
 		var j map[string]interface{}
 		json.Unmarshal([]byte(params["payload"]), &j)
 		repo := j["repository"].(map[string]interface{})
 		ref := j["ref"].(string)
-		p = findProject(ref, repo)
+		ps = findProjects(ps, ref, repo)
 	} else if params["repository"] != "" {
 		var repo map[string]interface{}
 		json.Unmarshal([]byte(params["repository"]), &repo)
 		ref := params["ref"]
-		p = findProject(ref, repo)
+		ps = findProjects(ps, ref, repo)
 	}
-	if p == nil {
+	if len(ps) == 0 {
 		w.WriteHeader(400)
 		w.Write([]byte("Invalid project"))
 		return
 	}
 	stage := params["stage"]
-	if p.protected && u.Name == "" {
-		w.WriteHeader(403)
-		w.Write([]byte("Unauthorized"))
-		return
-	}
-	expectedRef := fmt.Sprintf("refs/heads/%s", p.branch)
-	requestedRef := expectedRef
-	if params["payload"] != "" {
-		var j map[string]interface{}
-		json.Unmarshal([]byte(params["payload"]), &j)
-		requestedRef = fmt.Sprint(j["ref"])
-	} else if params["ref"] != "" {
-		requestedRef = params["ref"]
-	}
-	if requestedRef == expectedRef {
-		switch stage {
-		case "clean":
-			p.buildFrom(CLEANING, nil, true)
-		case "clone":
-			p.buildFrom(CLONING, nil, true)
-		case "prepare":
-			p.buildFrom(PREPARING, nil, true)
-		case "pull":
-			p.buildFrom(PULLING, nil, true)
-		case "build":
-			p.buildFrom(BUILDING, nil, true)
-		case "prepackage":
-			p.buildFrom(PREPACKAGING, nil, true)
-		case "package":
-			p.buildFrom(PACKAGING, nil, true)
-		case "scan":
-			p.buildFrom(SCANNING, nil, true)
-		case "push":
-			p.buildFrom(PUSHING, nil, true)
-		case "tag":
-			p.buildFrom(TAGGING, nil, true)
+	for _, p := range ps {
+		if p.protected && u.Name == "" {
+			w.WriteHeader(403)
+			w.Write([]byte("Unauthorized"))
+			return
 		}
-	} else {
-		logger.Infof("Build requested by %s expected %s, skipping", requestedRef, expectedRef)
+		expectedRef := fmt.Sprintf("refs/heads/%s", p.branch)
+		requestedRef := expectedRef
+		if params["payload"] != "" {
+			var j map[string]interface{}
+			json.Unmarshal([]byte(params["payload"]), &j)
+			requestedRef = fmt.Sprint(j["ref"])
+		} else if params["ref"] != "" {
+			requestedRef = params["ref"]
+		}
+		if requestedRef == expectedRef {
+			switch stage {
+			case "clean":
+				p.buildFrom(CLEANING, nil, true)
+			case "clone":
+				p.buildFrom(CLONING, nil, true)
+			case "prepare":
+				p.buildFrom(PREPARING, nil, true)
+			case "pull":
+				p.buildFrom(PULLING, nil, true)
+			case "build":
+				p.buildFrom(BUILDING, nil, true)
+			case "prepackage":
+				p.buildFrom(PREPACKAGING, nil, true)
+			case "package":
+				p.buildFrom(PACKAGING, nil, true)
+			case "scan":
+				p.buildFrom(SCANNING, nil, true)
+			case "push":
+				p.buildFrom(PUSHING, nil, true)
+			case "tag":
+				p.buildFrom(TAGGING, nil, true)
+			}
+		} else {
+			logger.Infof("Build requested by %s expected %s, skipping", requestedRef, expectedRef)
+		}
 	}
 	w.WriteHeader(200)
 	w.Write([]byte("OK"))
