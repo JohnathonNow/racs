@@ -286,6 +286,7 @@ func projectRoutine(p *project) {
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
 				args = []string{"build",
+					"--build-arg-file", projectEnvironment(p, request),
 					"--pull=newer",
 					"--squash",
 					"-f", spec,
@@ -324,6 +325,7 @@ func projectRoutine(p *project) {
 					cache_ttl = "0"
 				}
 				args = []string{"build",
+					"--build-arg-file", projectEnvironment(p, request),
 					"--pull=newer",
 					"--layers",
 					fmt.Sprintf("--cache-ttl=%s", cache_ttl),
