@@ -496,6 +496,8 @@ func projectRoutine(p *project) {
 		logger.Infof("Project %d finished task %s", p.id, state.String())
 		switch p.state {
 		case CREATE_SUCCESS:
+			p.buildHash = []byte{}
+			db.Exec(`UPDATE projects SET buildHash = ? WHERE id = ?`, p.buildHash, p.id)
 			request = taskRequest{CLEANING, request.from, request.trigger, 0, false}
 		case CLEAN_SUCCESS:
 			request = taskRequest{CLONING, request.from, request.trigger, 0, false}
@@ -516,7 +518,7 @@ func projectRoutine(p *project) {
 			}
 			if !bytes.Equal(buildHash, p.buildHash) {
 				p.buildHash = buildHash
-				db.Exec(`UPDATE projects SET buildHash = ? WHERE id = ?`, buildHash, p.id)
+				db.Exec(`UPDATE projects SET buildHash = ? WHERE id = ?`, p.buildHash, p.id)
 				request = taskRequest{PREPARING, request.from, request.trigger, 0, false}
 			} else {
 				if !p.protected || request.trigger == nil {
