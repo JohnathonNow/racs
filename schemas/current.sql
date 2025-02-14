@@ -15,7 +15,7 @@ CREATE TABLE registries(
 	name STRING,
 	url STRING,
 	user STRING,
-	password STRING,
+	credential INTEGER,
 	timeout INTEGER
 ); 
 
