@@ -209,6 +209,7 @@ func registryList() []map[string]interface{} {
 			"url":     r.url,
 			"user":    r.user,
 			"timeout": r.timeout,
+			"login":   r.login.Format(time.RFC3339),
 		})
 	}
 	return result

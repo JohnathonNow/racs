@@ -107,6 +107,12 @@
 						<input class="input" type="number" name="timeout" id="update_timeout"/>
 					</div>
 				</div>
+				<div class="field">
+					<label class="label">Login</label>
+					<div class="control">
+						<span id="update_login"/>
+					</div>
+				</div>
 			</section>
 			<footer class="modal-card-foot">
 				<span style="flex:1 1;"/>
@@ -217,6 +223,7 @@
 			document.getElementById("update_user").value = this.user;
 			document.getElementById("update_password").value = "";
 			document.getElementById("update_timeout").value = this.timeout;
+			document.getElementById("update_login").textContent = this.login;
 			var modal = document.getElementById("settings");
 			modal.addClass("is-active");
 		}
