@@ -304,9 +304,9 @@ func projectRoutine(p *project) {
 			args = []string{"clone", "-v", "--recursive", "-b", p.branch, p.url, fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id)}
 		case PREPARING:
 			if p.buildSpec != "" {
-				registryLoginBySpec(p.buildSpec)
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
+				registryLoginBySpec(spec)
 				args = []string{"build",
 					"--build-arg-file", projectEnvironment(p, request),
 					"--pull=newer",
@@ -340,9 +340,9 @@ func projectRoutine(p *project) {
 			}
 		case PREPACKAGING:
 			if p.prepackageSpec != "" {
-				registryLoginBySpec(p.prepackageSpec)
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
+				registryLoginBySpec(spec)
 				cache_ttl := "24h"
 				if request.force {
 					cache_ttl = "0"
@@ -365,11 +365,11 @@ func projectRoutine(p *project) {
 			}
 		case PACKAGING:
 			if p.packageSpec != "" {
-				if p.prepackageSpec == "" {
-					registryLoginBySpec(p.packageSpec)
-				}
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.packageSpec)
+				if p.prepackageSpec == "" {
+					registryLoginBySpec(spec)
+				}
 				args = []string{"build",
 					"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
 					"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
