@@ -263,7 +263,7 @@ func projectEnvironment(p *project, request taskRequest) string {
 
 var jobSemaphore *semaphore.Weighted
 
-var fromPattern = regexp.MustCompile("^FROM ([^\/]*).*$")
+var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
 
 func registryLoginBySpec(spec string) {
 	f, _ := os.Open(spec)
