@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -260,6 +261,24 @@ func projectEnvironment(p *project, request taskRequest) string {
 
 var jobSemaphore *semaphore.Weighted
 
+var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
+
+func registryLoginBySpec(spec string) {
+	f, _ := os.Open(spec)
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		from := fromPattern.FindStringSubmatch(s.Text())
+		if from != nil {
+			for _, registry := range registries {
+				if from[1] == registry.url {
+					registryLogin(registry)
+				}
+			}
+		}
+	}
+}
+
 func projectRoutine(p *project) {
 	os.Mkdir(fmt.Sprintf("%s/%d/context", projectAbs, p.id), 0777)
 	os.Mkdir(fmt.Sprintf("%s/%d/workspace", projectAbs, p.id), 0777)
@@ -283,6 +302,7 @@ func projectRoutine(p *project) {
 			args = []string{"clone", "-v", "--recursive", "-b", p.branch, p.url, fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id)}
 		case PREPARING:
 			if p.buildSpec != "" {
+				registryLoginBySpec(p.buildSpec)
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
 				args = []string{"build",
@@ -318,6 +338,7 @@ func projectRoutine(p *project) {
 			}
 		case PREPACKAGING:
 			if p.prepackageSpec != "" {
+				registryLoginBySpec(p.prepackageSpec)
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
 				cache_ttl := "24h"
@@ -342,6 +363,9 @@ func projectRoutine(p *project) {
 			}
 		case PACKAGING:
 			if p.packageSpec != "" {
+				if p.prepackageSpec == "" {
+					registryLoginBySpec(p.packageSpec)
+				}
 				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.packageSpec)
 				args = []string{"build",
