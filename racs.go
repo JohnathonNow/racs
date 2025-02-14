@@ -106,13 +106,13 @@ type task struct {
 }
 
 type registry struct {
-	id       int
-	name     string
-	url      string
-	user     string
-	password string
-	login    time.Time
-	timeout  int
+	id         int
+	name       string
+	url        string
+	user       string
+	credential int
+	login      time.Time
+	timeout    int
 }
 
 type taskTrigger struct {
@@ -204,23 +204,24 @@ func registryList() []map[string]interface{} {
 	result := make([]map[string]interface{}, 0)
 	for id, r := range registries {
 		result = append(result, map[string]interface{}{
-			"id":      id,
-			"name":    r.name,
-			"url":     r.url,
-			"user":    r.user,
-			"timeout": r.timeout,
-			"login":   r.login.Format(time.RFC3339),
+			"id":         id,
+			"name":       r.name,
+			"url":        r.url,
+			"user":       r.user,
+			"credential": r.credential,
+			"timeout":    r.timeout,
+			"login":      r.login.Format(time.RFC3339),
 		})
 	}
 	return result
 }
 
-func registryCreate(name, url, user, password string, timeout int) *registry {
+func registryCreate(name, url, user string, credential, timeout int) *registry {
 	var id int
-	db.QueryRow(`INSERT INTO registries(name, url, user, password, timeout) VALUES(?, ?, ?, ?, ?) RETURNING id`,
-		name, url, user, password, timeout).Scan(&id)
+	db.QueryRow(`INSERT INTO registries(name, url, user, credential, timeout) VALUES(?, ?, ?, ?, ?) RETURNING id`,
+		name, url, user, credential, timeout).Scan(&id)
 	logger.Infof("Registry created %s %s %s ******", name, url, user)
-	r := &registry{id, name, url, user, password, time.Unix(0, 0), timeout}
+	r := &registry{id, name, url, user, credential, time.Unix(0, 0), timeout}
 	registries[r.id] = r
 	return r
 }
@@ -228,8 +229,9 @@ func registryCreate(name, url, user, password string, timeout int) *registry {
 func registryLogin(r *registry) string {
 	if time.Since(r.login).Minutes() > float64(r.timeout) {
 		if len(r.user) > 0 {
-			logger.Infof("Logging into registry %s", r.url)
-			exec.Command("podman", "login", r.url, "-u", r.user, "-p", r.password).Run()
+			cr := credentials[r.credential]
+			logger.Infof("Logging into registry %s -> %s", r.url, cr.description)
+			exec.Command("podman", "login", r.url, "-u", r.user, "-p", cr.value).Run()
 		}
 		r.login = time.Now()
 	}
@@ -1552,9 +1554,9 @@ func handleRegistryCreate(w http.ResponseWriter, r *http.Request, u *user, param
 	name := params["name"]
 	url := params["url"]
 	user := params["user"]
-	password := params["password"]
+	credential, _ := strconv.Atoi(params["credential"])
 	timeout, _ := strconv.Atoi(params["timeout"])
-	reg := registryCreate(name, url, user, password, timeout)
+	reg := registryCreate(name, url, user, credential, timeout)
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1574,9 +1576,9 @@ func handleRegistryUpdate(w http.ResponseWriter, r *http.Request, u *user, param
 	reg.name = params["name"]
 	reg.url = params["url"]
 	reg.user = params["user"]
-	reg.password = params["password"]
+	reg.credential, _ = strconv.Atoi(params["credential"])
 	reg.timeout, _ = strconv.Atoi(params["timeout"])
-	db.Exec(`UPDATE registries SET name = ?, url = ?, user = ?, password = ?, timeout = ? WHERE id = ?`, reg.name, reg.url, reg.user, reg.password, reg.timeout, reg.id)
+	db.Exec(`UPDATE registries SET name = ?, url = ?, user = ?, credential = ?, timeout = ? WHERE id = ?`, reg.name, reg.url, reg.user, reg.credential, reg.timeout, reg.id)
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1811,16 +1813,16 @@ func main() {
 		states[state.String()] = state
 	}
 	db.Exec(`UPDATE tasks SET state = 'STOPPED' WHERE state = 'RUNNING'`)
-	rows, err := db.Query(`SELECT id, name, url, user, password, timeout FROM registries`)
+	rows, err := db.Query(`SELECT id, name, url, user, credential, timeout FROM registries`)
 	for rows.Next() {
 		var id int
 		var name string
 		var url string
 		var user string
-		var password string
+		var credential int
 		var timeout int
-		rows.Scan(&id, &name, &url, &user, &password, &timeout)
-		registries[id] = &registry{id, name, url, user, password, time.Unix(0, 0), timeout}
+		rows.Scan(&id, &name, &url, &user, &credential, &timeout)
+		registries[id] = &registry{id, name, url, user, credential, time.Unix(0, 0), timeout}
 	}
 	rows, err = db.Query(`SELECT id, description, value FROM credentials`)
 	for rows.Next() {
