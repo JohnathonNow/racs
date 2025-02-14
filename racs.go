@@ -227,6 +227,7 @@ func registryCreate(name, url, user, password string, timeout int) *registry {
 func registryLogin(r *registry) string {
 	if time.Since(r.login).Minutes() > float64(r.timeout) {
 		if len(r.user) > 0 {
+			logger.Infof("Logging into registry %s", r.url)
 			exec.Command("podman", "login", r.url, "-u", r.user, "-p", r.password).Run()
 		}
 		r.login = time.Now()
