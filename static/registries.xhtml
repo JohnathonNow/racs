@@ -96,9 +96,9 @@
 					</div>
 				</div>
 				<div class="field">
-					<label class="label">Password</label>
+					<label class="label">Credential</label>
 					<div class="control">
-						<input class="input" type="password" name="password" id="update_password"/>
+						<select class="select" name="credential" id="update_credential"/>
 					</div>
 				</div>
 				<div class="field">
@@ -221,7 +221,7 @@
 			document.getElementById("update_name").value = this.name;
 			document.getElementById("update_url").value = this.url;
 			document.getElementById("update_user").value = this.user;
-			document.getElementById("update_password").value = "";
+			document.getElementById("update_credential").value = (this.credential || "").toString();
 			document.getElementById("update_timeout").value = this.timeout;
 			document.getElementById("update_login").textContent = this.login;
 			var modal = document.getElementById("settings");
@@ -255,6 +255,7 @@
 		
 		var container = document.getElementById("registries");
 		var registries = [];
+		var credentials = [];
 
 		function updateRegistry(result) {
 			var registry = registries[result.id];
@@ -321,6 +322,12 @@
 			fetch("/registry/list").then(response => response.json()).then(results => {
 				results.forEach(updateRegistry);
 				if (events === null) connectEvents();
+			});
+			fetch("/credential/list").then(response => response.json()).then(results => {
+				var select = document.getElementById("update_credential");
+				select.removeChildren();
+				select.appendChild(create("option", {value: ""}, "--- Credential ---"));
+				select.appendChildren(results.map(credential => create("option", {value: credential.id}, credential.description)));
 			});
 		}
 		
