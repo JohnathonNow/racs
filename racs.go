@@ -226,16 +226,19 @@ func registryCreate(name, url, user string, credential, timeout int) *registry {
 	return r
 }
 
-func registryLogin(r *registry) string {
+func registryLogin(r *registry) (bool, string) {
 	if time.Since(r.login).Minutes() > float64(r.timeout) {
 		if len(r.user) > 0 {
 			cr := credentials[r.credential]
 			logger.Infof("Logging into registry %s -> %s", r.url, cr.description)
-			exec.Command("podman", "login", r.url, "-u", r.user, "-p", cr.value).Run()
+			out, err := exec.Command("podman", "login", r.url, "-u", r.user, "-p", cr.value).CombinedOutput()
+			if err != nil {
+				return false, string(out)
+			}
 		}
 		r.login = time.Now()
 	}
-	return r.url
+	return true, r.url
 }
 
 func (p *project) buildFrom(state state, trigger *taskTrigger, force bool) {
@@ -267,20 +270,25 @@ var jobSemaphore *semaphore.Weighted
 
 var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
 
-func registryLoginBySpec(spec string) {
+func registryLoginBySpec(spec string) (bool, string) {
 	f, _ := os.Open(spec)
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		from := fromPattern.FindStringSubmatch(s.Text())
 		if from != nil {
-			for _, registry := range registries {
-				if from[1] == registry.url {
-					registryLogin(registry)
+			for _, r := range registries {
+				if from[1] == r.url {
+					ok, msg := registryLogin(r)
+					if !ok {
+						return false, msg
+					}
+					return true, r.url
 				}
 			}
 		}
 	}
+	return true, ""
 }
 
 func projectRoutine(p *project) {
@@ -306,20 +314,25 @@ func projectRoutine(p *project) {
 			args = []string{"clone", "-v", "--recursive", "-b", p.branch, p.url, fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id)}
 		case PREPARING:
 			if p.buildSpec != "" {
-				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
-				registryLoginBySpec(spec)
-				args = []string{"build",
-					"--build-arg-file", projectEnvironment(p, request),
-					"--pull=newer",
-					"--squash",
-					"-f", spec,
-					"-t", fmt.Sprintf("builder-%d", p.id),
+				ok, url := registryLoginBySpec(spec)
+				if ok {
+					command = "podman"
+					args = []string{"build",
+						"--build-arg-file", projectEnvironment(p, request),
+						"--pull=newer",
+						"--squash",
+						"-f", spec,
+						"-t", fmt.Sprintf("builder-%d", p.id),
+					}
+					if p.prepareDep != nil {
+						args = append(args, "--from", fmt.Sprintf("package-%d", p.prepareDep.id))
+					}
+					args = append(args, fmt.Sprintf("%s/%d/context", projectAbs, p.id))
+				} else {
+					command = "error"
+					args = []string{url}
 				}
-				if p.prepareDep != nil {
-					args = append(args, "--from", fmt.Sprintf("package-%d", p.prepareDep.id))
-				}
-				args = append(args, fmt.Sprintf("%s/%d/context", projectAbs, p.id))
 			} else {
 				command = "echo"
 				args = []string{"skipping prepare"}
@@ -342,50 +355,62 @@ func projectRoutine(p *project) {
 			}
 		case PREPACKAGING:
 			if p.prepackageSpec != "" {
-				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
-				registryLoginBySpec(spec)
-				cache_ttl := "24h"
-				if request.force {
-					cache_ttl = "0"
+				ok, url := registryLoginBySpec(spec)
+				if ok {
+					command = "podman"
+					cache_ttl := "24h"
+					if request.force {
+						cache_ttl = "0"
+					}
+					args = []string{"build",
+						"--build-arg-file", projectEnvironment(p, request),
+						"--pull=newer",
+						"--layers",
+						fmt.Sprintf("--cache-ttl=%s", cache_ttl),
+						"-f", spec,
+						"-t", fmt.Sprintf("prepackage-%d", p.id),
+					}
+					if p.prepackageDep != nil {
+						args = append(args, "--from", fmt.Sprintf("package-%d", p.prepackageDep.id))
+					}
+					args = append(args, fmt.Sprintf("%s/%d/workspace", projectAbs, p.id))
+				} else {
+					command = "error"
+					args = []string{url}
 				}
-				args = []string{"build",
-					"--build-arg-file", projectEnvironment(p, request),
-					"--pull=newer",
-					"--layers",
-					fmt.Sprintf("--cache-ttl=%s", cache_ttl),
-					"-f", spec,
-					"-t", fmt.Sprintf("prepackage-%d", p.id),
-				}
-				if p.prepackageDep != nil {
-					args = append(args, "--from", fmt.Sprintf("package-%d", p.prepackageDep.id))
-				}
-				args = append(args, fmt.Sprintf("%s/%d/workspace", projectAbs, p.id))
 			} else {
 				command = "echo"
 				args = []string{"skipping prepackage"}
 			}
 		case PACKAGING:
 			if p.packageSpec != "" {
-				command = "podman"
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.packageSpec)
+				ok := true
+				url := ""
 				if p.prepackageSpec == "" {
-					registryLoginBySpec(spec)
+					ok, url = registryLoginBySpec(spec)
 				}
-				args = []string{"build",
-					"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
-					"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
-					"--pull=newer",
-					"--squash",
-					"-f", spec,
-					"-t", fmt.Sprintf("package-%d", p.id),
+				if ok {
+					command = "podman"
+					args = []string{"build",
+						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
+						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
+						"--pull=newer",
+						"--squash",
+						"-f", spec,
+						"-t", fmt.Sprintf("package-%d", p.id),
+					}
+					if p.packageDep != nil {
+						args = append(args, "--from", fmt.Sprintf("package-%d", p.packageDep.id))
+					} else if p.prepackageSpec != "" {
+						args = append(args, "--from", fmt.Sprintf("prepackage-%d", p.id))
+					}
+					args = append(args, fmt.Sprintf("%s/%d/context", projectAbs, p.id))
+				} else {
+					command = "error"
+					args = []string{url}
 				}
-				if p.packageDep != nil {
-					args = append(args, "--from", fmt.Sprintf("package-%d", p.packageDep.id))
-				} else if p.prepackageSpec != "" {
-					args = append(args, "--from", fmt.Sprintf("prepackage-%d", p.id))
-				}
-				args = append(args, fmt.Sprintf("%s/%d/context", projectAbs, p.id))
 			} else {
 				command = "echo"
 				args = []string{"skipping package"}
@@ -417,10 +442,15 @@ func projectRoutine(p *project) {
 				args = []string{"skipping push"}
 			} else if request.index < len(p.destinations) {
 				destination := p.destinations[request.index]
-				url := registryLogin(destination.registry)
-				tag := strings.Replace(destination.tag, "$VERSION", strconv.Itoa(p.version), -1)
-				command = "podman"
-				args = []string{"push", fmt.Sprintf("package-%d", p.id), fmt.Sprintf("%s/%s", url, tag)}
+				ok, url := registryLogin(destination.registry)
+				if ok {
+					tag := strings.Replace(destination.tag, "$VERSION", strconv.Itoa(p.version), -1)
+					command = "podman"
+					args = []string{"push", fmt.Sprintf("package-%d", p.id), fmt.Sprintf("%s/%s", url, tag)}
+				} else {
+					command = "error"
+					args = []string{url}
+				}
 			} else {
 				command = "echo"
 				args = []string{"skipping push"}
@@ -481,28 +511,34 @@ func projectRoutine(p *project) {
 			taskRoot := fmt.Sprintf("tasks/%d", t.id)
 			os.Mkdir(taskRoot, 0777)
 			logger.Infof("Task %s %v", command, args)
-			cmd := exec.Command(command, args...)
-			activeCommands[id] = cmd
-			cmd.Dir = dir
-			cmd.Env = append(cmd.Environ(), env...)
 			out, _ := os.Create(fmt.Sprintf("%s/out.log", taskRoot))
-			out.WriteString("\u001B[1m")
-			out.WriteString(cmd.String())
-			out.WriteString("\u001B[0m\n")
-			cmd.Stdout = out
-			cmd.Stderr = out
-			err = cmd.Run()
-			jobSemaphore.Release(1)
-			if err != nil {
-				if err.Error() == "signal: killed" {
-					t.state = "STOPPED"
+			if command != "error" {
+				cmd := exec.Command(command, args...)
+				activeCommands[id] = cmd
+				cmd.Dir = dir
+				cmd.Env = append(cmd.Environ(), env...)
+				out.WriteString("\u001B[1m")
+				out.WriteString(cmd.String())
+				out.WriteString("\u001B[0m\n")
+				cmd.Stdout = out
+				cmd.Stderr = out
+				err = cmd.Run()
+				jobSemaphore.Release(1)
+				if err != nil {
+					if err.Error() == "signal: killed" {
+						t.state = "STOPPED"
+					} else {
+						t.state = "ERROR"
+					}
+					p.state += 1
 				} else {
-					t.state = "ERROR"
+					t.state = "SUCCESS"
+					p.state += 2
 				}
-				p.state += 1
 			} else {
-				t.state = "SUCCESS"
-				p.state += 2
+				out.WriteString(args[0])
+				t.state = "ERROR"
+				p.state += 1
 			}
 			out.Close()
 			delete(activeCommands, t.id)
