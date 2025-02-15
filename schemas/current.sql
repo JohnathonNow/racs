@@ -75,4 +75,10 @@ CREATE TABLE environments(
 	credential INTEGER
 );
 
+CREATE TABLE crontab(
+	project INTEGER,
+	spec STRING,
+	next STRING
+);
+
 INSERT INTO config(name, value) VALUES('version', 3);
