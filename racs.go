@@ -1080,6 +1080,13 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 				edge.SetXLabel(label)
 			}
 		}
+		for name, cr := range p.credentials {
+			if cr.project > 0 {
+				tnode := nodes[cr.project]
+				edge, _ := graph.CreateEdge("", tnode, pnode)
+				edge.SetXLabel(fmt.Sprintf("%s", name))
+			}
+		}
 	}
 
 	format := graphviz.SVG
