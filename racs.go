@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/msteinert/pam"
 	"github.com/withmandala/go-log"
+	"github.com/xhit/go-str2duration/v2"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -100,9 +102,9 @@ func (s state) String() string {
 
 type task struct {
 	id    int
-	kind  string
+	kind  state
 	state string
-	time  string
+	time  time.Time
 }
 
 type registry struct {
@@ -137,6 +139,8 @@ type credential struct {
 	id          int
 	description string
 	value       string
+	project     int
+	expiry      time.Time
 }
 
 type destination struct {
@@ -210,7 +214,7 @@ func registryList() []map[string]interface{} {
 			"user":       r.user,
 			"credential": r.credential,
 			"timeout":    r.timeout,
-			"login":      r.login.Format(time.RFC3339),
+			"login":      r.login.Format(time.DateTime),
 		})
 	}
 	return result
@@ -260,14 +264,13 @@ func projectEnvironment(p *project, request taskRequest) string {
 		fmt.Fprintf(f, "RACS_TRIGGER_REGISTRY=%s\n", trigger.registry)
 	}
 	for name, cr := range p.credentials {
-		fmt.Fprintf(f, "%s=%s\n", name, cr.value)
+		fmt.Fprintf(f, "%s=%s\n", name, credentialValue(cr))
 	}
 	f.Close()
 	return filename
 }
 
 var jobSemaphore *semaphore.Weighted
-
 var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
 
 func registryLoginBySpec(spec string) (bool, string) {
@@ -289,6 +292,75 @@ func registryLoginBySpec(spec string) (bool, string) {
 		}
 	}
 	return true, ""
+}
+
+var projectStateMutex sync.Mutex
+var projectStateCond = sync.NewCond(&projectStateMutex)
+
+func lastTask(p *project, st state, after time.Time) *task {
+	for i := len(p.tasks) - 1; i >= 0; i-- {
+		t := p.tasks[i]
+		logger.Infof("Found task %s -> %s", t.kind.String(), t.state)
+		if t.time.After(after) {
+			switch t.state {
+			case "ERROR":
+				return t
+			case "STOPPED":
+				return t
+			case "QUEUE":
+				return nil
+			case "RUNNING":
+				return nil
+			case "SUCCESS":
+				if t.kind == st {
+					return t
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func credentialValue(cr *credential) string {
+	if cr.project > 0 && cr.expiry.Before(time.Now()) {
+		p := projects[cr.project]
+		start := time.Now()
+		p.buildFrom(PULLING, nil, false)
+		projectStateMutex.Lock()
+		t := lastTask(p, BUILDING, start)
+		for t == nil {
+			projectStateCond.Wait()
+			t = lastTask(p, BUILDING, start)
+		}
+		projectStateMutex.Unlock()
+		if t.state == "SUCCESS" {
+			in, err := os.Open(fmt.Sprintf("tasks/%d/out.log", t.id))
+			if err != nil {
+				return "<Error opening log file>"
+			}
+			defer in.Close()
+			s := bufio.NewScanner(in)
+			var value = ""
+			var duration = ""
+			for s.Scan() {
+				line := s.Text()
+				if strings.HasPrefix(line, "RACS_CREDENTIAL_VALUE ") {
+					value = line[22:]
+				} else if strings.HasPrefix(line, "RACS_CREDENTIAL_EXPIRY ") {
+					duration = line[23:]
+				}
+			}
+			cr.value = value
+			if duration != "" {
+				d, _ := str2duration.ParseDuration(duration)
+				cr.expiry = t.time.Add(d)
+			}
+			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Format(time.DateTime), cr.id)
+		} else {
+			return "<Error building project>"
+		}
+	}
+	return cr.value
 }
 
 func projectRoutine(p *project) {
@@ -430,7 +502,7 @@ func projectRoutine(p *project) {
 					fmt.Sprintf("RACS_SCAN_PROJECT=%d", p.id),
 				}
 				for name, cr := range s.credentials {
-					env = append(env, fmt.Sprintf("%s=%s", name, cr.value))
+					env = append(env, fmt.Sprintf("%s=%s", name, credentialValue(cr)))
 				}
 			} else {
 				command = "echo"
@@ -478,24 +550,24 @@ func projectRoutine(p *project) {
 		p.state = state
 		if len(command) > 0 {
 			var id int
-			var time string
+			now := time.Now()
 			err := db.QueryRow(`INSERT INTO tasks(project, type, state, time)
-				VALUES(?, ?, 'QUEUED', datetime('now')) RETURNING id, time`, p.id, p.state.String()).Scan(&id, &time)
+				VALUES(?, ?, 'QUEUED', ?) RETURNING id`, p.id, p.state.String(), now.Format(time.DateTime)).Scan(&id)
 			if err != nil {
 				logger.Fatal(err)
 			}
 			logger.Infof("Creating task %d:%d", p.id, id)
-			t := &task{id, p.state.String(), "QUEUED", time}
+			t := &task{id, p.state, "QUEUED", now}
 			p.tasks = append(p.tasks, t)
-			if len(p.tasks) > 5 {
+			if len(p.tasks) > 10 {
 				p.tasks = p.tasks[1:]
 			}
 			event(map[string]interface{}{
 				"event":   "task/create",
 				"project": p.id,
 				"id":      t.id,
-				"type":    t.kind,
-				"time":    t.time,
+				"type":    t.kind.String(),
+				"time":    t.time.Format(time.DateTime),
 				"state":   "QUEUED",
 			})
 			ctx := context.TODO()
@@ -526,20 +598,30 @@ func projectRoutine(p *project) {
 				jobSemaphore.Release(1)
 				if err != nil {
 					if err.Error() == "signal: killed" {
+						projectStateMutex.Lock()
 						t.state = "STOPPED"
+						projectStateMutex.Unlock()
 					} else {
+						projectStateMutex.Lock()
 						t.state = "ERROR"
+						projectStateMutex.Unlock()
 					}
 					p.state += 1
 				} else {
+					projectStateMutex.Lock()
 					t.state = "SUCCESS"
+					projectStateMutex.Unlock()
 					p.state += 2
 				}
 			} else {
+				jobSemaphore.Release(1)
 				out.WriteString(args[0])
+				projectStateMutex.Lock()
 				t.state = "ERROR"
+				projectStateMutex.Unlock()
 				p.state += 1
 			}
+			projectStateCond.Broadcast()
 			out.Close()
 			delete(activeCommands, t.id)
 			logger.Infof("Task %d completed", t.id)
@@ -746,12 +828,12 @@ func projectList() []map[string]interface{} {
 	result := make([]map[string]interface{}, 0)
 	for id, p := range projects {
 		tasks := make([]interface{}, 0)
-		for _, task := range p.tasks {
+		for _, t := range p.tasks {
 			tasks = append(tasks, map[string]interface{}{
-				"id":    task.id,
-				"type":  task.kind,
-				"state": task.state,
-				"time":  task.time,
+				"id":    t.id,
+				"type":  t.kind.String(),
+				"state": t.state,
+				"time":  t.time.Format(time.DateTime),
 			})
 		}
 		destinations := make([]interface{}, 0)
@@ -1217,7 +1299,7 @@ func handleProjectConfigList(w http.ResponseWriter, r *http.Request, u *user, pa
 			files = append(files, map[string]interface{}{
 				"name": e.Name(),
 				"size": info.Size(),
-				"time": info.ModTime().Format(time.RFC3339),
+				"time": info.ModTime().Format(time.DateTime),
 			})
 		}
 	}
@@ -1631,6 +1713,8 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 		result = append(result, map[string]interface{}{
 			"id":          id,
 			"description": cr.description,
+			"projects":    cr.project,
+			"expiry":      cr.expiry.Format(time.DateTime),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -1649,9 +1733,10 @@ func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, par
 	}
 	description := params["description"]
 	value := params["value"]
+	project, _ := strconv.Atoi(params["project"])
 	var id int
-	db.QueryRow(`INSERT INTO credentials(description, value) VALUES(?, ?) RETURNING id`, description, value).Scan(&id)
-	credentials[id] = &credential{id, description, value}
+	db.QueryRow(`INSERT INTO credentials(description, value, project) VALUES(?, ?, ?) RETURNING id`, description, value, project).Scan(&id)
+	credentials[id] = &credential{id, description, value, project, time.Unix(0, 0)}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1668,9 +1753,11 @@ func handleCredentialUpdate(w http.ResponseWriter, r *http.Request, u *user, par
 	}
 	id, _ := strconv.Atoi(params["id"])
 	value := params["value"]
+	project, _ := strconv.Atoi(params["project"])
 	cr := credentials[id]
 	cr.value = value
-	db.Exec(`UPDATE credentials SET value = ? WHERE id = ?`, value, id)
+	cr.project = project
+	db.Exec(`UPDATE credentials SET value = ?, project = ? WHERE id = ?`, value, project, id)
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1860,13 +1947,19 @@ func main() {
 		rows.Scan(&id, &name, &url, &user, &credential, &timeout)
 		registries[id] = &registry{id, name, url, user, credential, time.Unix(0, 0), timeout}
 	}
-	rows, err = db.Query(`SELECT id, description, value FROM credentials`)
+	rows, err = db.Query(`SELECT id, description, value, project, expiry FROM credentials`)
 	for rows.Next() {
 		var id int
 		var description string
 		var value string
-		rows.Scan(&id, &description, &value)
-		cr := &credential{id, description, value}
+		var project int
+		var expiryStr string
+		rows.Scan(&id, &description, &value, &project, &expiryStr)
+		expiry, err := time.Parse(time.DateTime, expiryStr)
+		if err != nil {
+			expiry = time.Unix(0, 0)
+		}
+		cr := &credential{id, description, value, project, expiry}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tagRepo FROM projects`)
@@ -1880,17 +1973,17 @@ func main() {
 		var packageSpec string
 		var buildHash []byte
 		var labels string
-		var stateName string
+		var state string
 		var version int
 		var protected int
 		var tagRepo int
-		err := rows.Scan(&id, &name, &labels, &source, &branch, &buildSpec, &prepackageSpec, &packageSpec, &buildHash, &stateName, &version, &protected, &tagRepo)
+		err := rows.Scan(&id, &name, &labels, &source, &branch, &buildSpec, &prepackageSpec, &packageSpec, &buildHash, &state, &version, &protected, &tagRepo)
 		if err != nil {
 			logger.Error(err)
 		}
 		p := &project{
 			id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash,
-			states[stateName], version, protected == 1, tagRepo == 1,
+			states[state], version, protected == 1, tagRepo == 1,
 			make([]destination, 0),
 			make([]*task, 0),
 			make(chan taskRequest, 10),
@@ -1927,12 +2020,13 @@ func main() {
 		var id int
 		var kind string
 		var state string
-		var time string
-		rows.Scan(&pid, &id, &kind, &state, &time)
+		var timeStr string
+		rows.Scan(&pid, &id, &kind, &state, &timeStr)
 		p := projects[pid]
 		if p != nil {
-			p.tasks = append(p.tasks, &task{id, kind, state, time})
-			if len(p.tasks) > 5 {
+			timeVal, _ := time.Parse(time.DateTime, timeStr)
+			p.tasks = append(p.tasks, &task{id, states[kind], state, timeVal})
+			if len(p.tasks) > 10 {
 				p.tasks = p.tasks[1:]
 			}
 		}

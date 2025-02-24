@@ -1058,7 +1058,7 @@
 					create("span.time", time[0], " ", time[1], " ")
 				);
 				project.tasks.appendChild(task.box);
-				while (project.tasks.children.length > 5) {
+				while (project.tasks.children.length > 10) {
 					project.tasks.removeChild(project.tasks.firstChild);
 				}
 				//project.tasks.scrollIntoView(false);
@@ -1106,7 +1106,7 @@
 
 		document.getElementById("name-filter").oninput = filterProjects;
 
-		var filter = JSON.parse(sessionStorage.getItem("filter") || "{}");
+		var filter = JSON.parse(localStorage.getItem("filter") || "{}");
 		var labels = {};
 
 		function labelTag(label) {
@@ -1159,7 +1159,7 @@
 			for (var label in labels) if (labels[label].checked) {
 				filterCount++;
 			}
-			sessionStorage.setItem("filter", JSON.stringify(filter));
+			localStorage.setItem("filter", JSON.stringify(filter));
 			var filterLabel = document.getElementById("filter-label");
 			if (filterCount > 0) {
 				filterLabel.textContent = `Filter (${filterCount})`;

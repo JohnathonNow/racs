@@ -66,7 +66,9 @@ CREATE TABLE triggers(
 CREATE TABLE credentials(
 	id INTEGER PRIMARY KEY,
 	description STRING,
-	value STRING
+	value STRING,
+	project INTEGER,
+	expiry STRING
 );
 
 CREATE TABLE environments(
@@ -81,4 +83,4 @@ CREATE TABLE crontab(
 	next STRING
 );
 
-INSERT INTO config(name, value) VALUES('version', 3);
+INSERT INTO config(name, value) VALUES('version', 4);
