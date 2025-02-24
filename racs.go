@@ -1720,7 +1720,7 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 		result = append(result, map[string]interface{}{
 			"id":          id,
 			"description": cr.description,
-			"projects":    cr.project,
+			"project":     cr.project,
 			"expiry":      cr.expiry.Format(time.DateTime),
 		})
 	}
