@@ -1,0 +1,2 @@
+ALTER TABLE credentials ADD COLUMN project INTEGER;
+ALTER TABLE credentials ADD COLUMN expiry STRING;
