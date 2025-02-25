@@ -117,16 +117,6 @@ type registry struct {
 	timeout    int
 }
 
-type taskTrigger struct {
-	url      string
-	branch   string
-	commit   string
-	tag      string
-	registry string
-	project  int
-	version  int
-}
-
 type taskRequest struct {
 	state   state
 	from    state
@@ -140,7 +130,7 @@ type credential struct {
 	description string
 	value       string
 	project     int
-	argument    string
+	request     string
 	expiry      time.Time
 }
 
@@ -327,7 +317,7 @@ func credentialValue(cr *credential) string {
 		start := time.Now()
 		trigger := map[string]string{
 			"CREDENTIAL": cr.description,
-			"ARGUMENT":   cr.argument,
+			"REQUEST":    cr.request,
 		}
 		p.buildFrom(PULLING, trigger, false)
 		projectStateMutex.Lock()
@@ -359,6 +349,7 @@ func credentialValue(cr *credential) string {
 				d, _ := str2duration.ParseDuration(duration)
 				cr.expiry = t.time.Add(d)
 			}
+			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Format(time.DateTime), cr.id)
 		} else {
 			return "<Error building project>"
 		}
@@ -1733,6 +1724,7 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 			"id":          id,
 			"description": cr.description,
 			"project":     cr.project,
+			"request":     cr.request,
 			"expiry":      cr.expiry.Format(time.DateTime),
 		})
 	}
@@ -1753,9 +1745,10 @@ func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, par
 	description := params["description"]
 	value := params["value"]
 	project, _ := strconv.Atoi(params["project"])
+	request := params["request"]
 	var id int
-	db.QueryRow(`INSERT INTO credentials(description, value, project) VALUES(?, ?, ?) RETURNING id`, description, value, project).Scan(&id)
-	credentials[id] = &credential{id, description, value, project, value, time.Unix(0, 0)}
+	db.QueryRow(`INSERT INTO credentials(description, value, project, request) VALUES(?, ?, ?, ?) RETURNING id`, description, value, project, request).Scan(&id)
+	credentials[id] = &credential{id, description, value, project, request, time.Unix(0, 0)}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1773,10 +1766,12 @@ func handleCredentialUpdate(w http.ResponseWriter, r *http.Request, u *user, par
 	id, _ := strconv.Atoi(params["id"])
 	value := params["value"]
 	project, _ := strconv.Atoi(params["project"])
+	request := params["request"]
 	cr := credentials[id]
 	cr.value = value
 	cr.project = project
-	db.Exec(`UPDATE credentials SET value = ?, project = ? WHERE id = ?`, value, project, id)
+	cr.request = request
+	db.Exec(`UPDATE credentials SET value = ?, project = ?, request = ? WHERE id = ?`, value, project, request, id)
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1966,19 +1961,20 @@ func main() {
 		rows.Scan(&id, &name, &url, &user, &credential, &timeout)
 		registries[id] = &registry{id, name, url, user, credential, time.Unix(0, 0), timeout}
 	}
-	rows, err = db.Query(`SELECT id, description, value, project, expiry FROM credentials`)
+	rows, err = db.Query(`SELECT id, description, value, project, request, expiry FROM credentials`)
 	for rows.Next() {
 		var id int
 		var description string
 		var value string
 		var project int
+		var request string
 		var expiryStr string
-		rows.Scan(&id, &description, &value, &project, &expiryStr)
+		rows.Scan(&id, &description, &value, &project, &request, &expiryStr)
 		expiry, err := time.Parse(time.DateTime, expiryStr)
 		if err != nil {
 			expiry = time.Unix(0, 0)
 		}
-		cr := &credential{id, description, value, project, value, expiry}
+		cr := &credential{id, description, value, project, request, expiry}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tagRepo FROM projects`)

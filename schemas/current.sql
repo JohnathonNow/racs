@@ -68,6 +68,7 @@ CREATE TABLE credentials(
 	description STRING,
 	value STRING,
 	project INTEGER,
+	request STRING,
 	expiry STRING
 );
 
