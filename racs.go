@@ -130,7 +130,7 @@ type taskTrigger struct {
 type taskRequest struct {
 	state   state
 	from    state
-	trigger *taskTrigger
+	trigger map[string]string
 	index   int
 	force   bool
 }
@@ -140,6 +140,7 @@ type credential struct {
 	description string
 	value       string
 	project     int
+	argument    string
 	expiry      time.Time
 }
 
@@ -245,7 +246,7 @@ func registryLogin(r *registry) (bool, string) {
 	return true, r.url
 }
 
-func (p *project) buildFrom(state state, trigger *taskTrigger, force bool) {
+func (p *project) buildFrom(state state, trigger map[string]string, force bool) {
 	p.queue <- taskRequest{state, state, trigger, 0, force}
 }
 
@@ -253,15 +254,14 @@ func projectEnvironment(p *project, request taskRequest) string {
 	filename := fmt.Sprintf("%s/%d/environment", projectAbs, p.id)
 	f, _ := os.Create(filename)
 	trigger := request.trigger
-	if trigger != nil {
-		fmt.Fprintf(f, "RACS_TRIGGER=%s\n", trigger.tag)
-		fmt.Fprintf(f, "RACS_VERSION=%d\n", trigger.version)
-		fmt.Fprintf(f, "RACS_TRIGGER_URL=%s\n", trigger.url)
-		fmt.Fprintf(f, "RACS_TRIGGER_BRANCH=%s\n", trigger.branch)
-		fmt.Fprintf(f, "RACS_TRIGGER_COMMIT=%s\n", trigger.commit)
-		fmt.Fprintf(f, "RACS_TRIGGER_TAG=%s\n", trigger.tag)
-		fmt.Fprintf(f, "RACS_TRIGGER_PROJECT=%d\n", trigger.project)
-		fmt.Fprintf(f, "RACS_TRIGGER_REGISTRY=%s\n", trigger.registry)
+	for name, value := range trigger {
+		fmt.Fprintf(f, "RACS_TRIGGER_%s=%s\n", name, value)
+	}
+	if value, ok := trigger["TAG"]; ok {
+		fmt.Fprintf(f, "RACS_TRIGGER=%s\n", value)
+	}
+	if value, ok := trigger["VERSION"]; ok {
+		fmt.Fprintf(f, "RACS_VERSION=%s\n", value)
 	}
 	for name, cr := range p.credentials {
 		fmt.Fprintf(f, "%s=%s\n", name, credentialValue(cr))
@@ -325,7 +325,11 @@ func credentialValue(cr *credential) string {
 	if cr.project > 0 && cr.expiry.Before(time.Now()) {
 		p := projects[cr.project]
 		start := time.Now()
-		p.buildFrom(PULLING, nil, false)
+		trigger := map[string]string{
+			"CREDENTIAL": cr.description,
+			"ARGUMENT":   cr.argument,
+		}
+		p.buildFrom(PULLING, trigger, false)
 		projectStateMutex.Lock()
 		t := lastTask(p, BUILDING, start)
 		for t == nil {
@@ -355,7 +359,6 @@ func credentialValue(cr *credential) string {
 				d, _ := str2duration.ParseDuration(duration)
 				cr.expiry = t.time.Add(d)
 			}
-			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Format(time.DateTime), cr.id)
 		} else {
 			return "<Error building project>"
 		}
@@ -720,7 +723,16 @@ func projectRoutine(p *project) {
 					tag = strings.Replace(destination.tag, "$VERSION", strconv.Itoa(p.version), -1)
 					registry = destination.registry.name
 				}
-				taskTrigger := &taskTrigger{p.url, p.branch, p.commit, tag, registry, p.id, p.version}
+				taskTrigger := map[string]string{
+					"URL":      p.url,
+					"BRANCH":   p.branch,
+					"COMMIT":   p.commit,
+					"TAG":      tag,
+					"REGISTRY": registry,
+					"PROJECT":  strconv.Itoa(p.id),
+					"VERSION":  strconv.Itoa(p.version),
+				}
+				//&taskTrigger{p.url, p.branch, p.commit, tag, registry, p.id, p.version}
 				for target, trigger := range p.triggers {
 					target.buildFrom(trigger.from, taskTrigger, false)
 				}
@@ -1743,7 +1755,7 @@ func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, par
 	project, _ := strconv.Atoi(params["project"])
 	var id int
 	db.QueryRow(`INSERT INTO credentials(description, value, project) VALUES(?, ?, ?) RETURNING id`, description, value, project).Scan(&id)
-	credentials[id] = &credential{id, description, value, project, time.Unix(0, 0)}
+	credentials[id] = &credential{id, description, value, project, value, time.Unix(0, 0)}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1966,7 +1978,7 @@ func main() {
 		if err != nil {
 			expiry = time.Unix(0, 0)
 		}
-		cr := &credential{id, description, value, project, expiry}
+		cr := &credential{id, description, value, project, value, expiry}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tagRepo FROM projects`)
