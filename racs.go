@@ -226,7 +226,7 @@ func registryLogin(r *registry) (bool, string) {
 		if len(r.user) > 0 {
 			cr := credentials[r.credential]
 			logger.Infof("Logging into registry %s -> %s", r.url, cr.description)
-			out, err := exec.Command("podman", "login", r.url, "-u", r.user, "-p", cr.value).CombinedOutput()
+			out, err := exec.Command("podman", "login", r.url, "-u", r.user, "-p", credentialValue(cr)).CombinedOutput()
 			if err != nil {
 				return false, string(out)
 			}
