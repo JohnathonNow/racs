@@ -336,18 +336,6 @@
 								</div>
 							</div>
 						</div>
-						<div class="field is-horizontal">
-							<div class="field-label is-normal">
-								<label class="label">Push Tag</label>
-							</div>
-							<div class="field-body">
-								<div class="field">
-									<div class="control is-expanded">
-										<input class="checkbox" type="checkbox" name="tagRepo" id="update_tagRepo"/>
-									</div>
-								</div>
-							</div>
-						</div>
 					</section>
 					<footer class="modal-card-foot">
 						<span style="flex:1 1;"/>
@@ -755,7 +743,6 @@
 			document.getElementById("update_prepackageSpec").value = this.prepackageSpec;
 			document.getElementById("update_packageSpec").value = this.packageSpec;
 			document.getElementById("update_protected").checked = this.protected;
-			document.getElementById("update_tagRepo").checked = this.tagRepo;
 			document.getElementById("upload_id").value = this.id;
 			document.getElementById("destination_id").value = this.id;
 			document.getElementById("trigger_id").value = this.id;
@@ -764,7 +751,7 @@
 			var destinations = document.getElementById("destination_table");
 			while (destinations.firstChild) destinations.removeChild(destinations.firstChild);
 			this.destinations.forEach(destination => {
-				addDestination(destination[0].toString(), destination[1]);
+				addDestination(destination[0].toString(), destination[1], destination[2]);
 			});
 			var triggers = document.getElementById("trigger_table");
 			while (triggers.firstChild) triggers.removeChild(triggers.firstChild);
@@ -815,18 +802,21 @@
 			}
 		}
 
-		function addDestination(registry, tag) {
+		function addDestination(registry, tag, tagRepo) {
 			var destinations = document.getElementById("destination_table");
 			var registrySelect = create("select",
 				create("option", {value: ""}, "--- Registry ---"),
 				registries.map(registry => create("option", {value: registry.id.toString()}, registry.name))
 			);
-			var tagEntry = create("input.input");
+			var tagEntry = create("input.input", {value: "$VERSION"});
+			var tagRepoCheckbox = create("input", {type: "checkbox"});
 			if (registry) registrySelect.value = registry.toString();
 			if (tag) tagEntry.value = tag;
+			tagRepoCheckbox.checked = tagRepo;
 			var row = create("tr",
 				create("td", create("div.select", registrySelect)),
 				create("td", tagEntry),
+				create("td", create("label", tagRepoCheckbox, "Tag Repo")),
 				create("td", create("span.button.is-danger", {"on-click": remove}, "Remove"))
 			);
 			destinations.appendChild(row);
@@ -841,7 +831,8 @@
 			destinations.childNodes.forEach(child => {
 				if (child.children[0].children[0].children[0].value !== "") value.push([
 					child.children[0].children[0].children[0].value,
-					child.children[1].children[0].value
+					child.children[1].children[0].value || "$VERSION",
+					child.children[2].children[0].children[0].checked ? 1 : 0
 				]);
 			});
 			document.getElementById("destination_destinations").value = value;

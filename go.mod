@@ -7,6 +7,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/msteinert/pam v1.1.0
 	github.com/withmandala/go-log v0.1.0
+	github.com/xhit/go-str2duration/v2 v2.1.0
 	golang.org/x/sync v0.8.0
 )
 

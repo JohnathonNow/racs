@@ -40,7 +40,8 @@ CREATE TABLE projects(
 CREATE TABLE destinations(
 	project INTEGER,
 	registry INTEGER,
-	tag STRING
+	tag STRING,
+	tagRepo INTEGER
 );
 
 CREATE TABLE tasks(
@@ -84,4 +85,4 @@ CREATE TABLE crontab(
 	next STRING
 );
 
-INSERT INTO config(name, value) VALUES('version', 4);
+INSERT INTO config(name, value) VALUES('version', 5);
