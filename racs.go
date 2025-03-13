@@ -1656,6 +1656,8 @@ func handleTaskList(w http.ResponseWriter, r *http.Request, u *user, params map[
 	w.Write(j)
 }
 
+var loginToSeeLogs = []byte("Log in to see logs")
+
 func handleTaskLogs(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
 	showLogs := false
 	for _, r := range u.Roles {
@@ -1664,10 +1666,10 @@ func handleTaskLogs(w http.ResponseWriter, r *http.Request, u *user, params map[
 		}
 	}
 	id, _ := strconv.Atoi(params["id"])
+	offset, _ := strconv.ParseInt(params["offset"], 10, 64)
 	var state string
 	db.QueryRow(`SELECT state FROM tasks WHERE id = ?`, id).Scan(&state)
 	if showLogs {
-		offset, _ := strconv.ParseInt(params["offset"], 10, 64)
 		file, _ := os.Open(fmt.Sprintf("tasks/%d/out.log", id))
 		file.Seek(offset, 0)
 		bytes, _ := ioutil.ReadAll(file)
@@ -1677,7 +1679,7 @@ func handleTaskLogs(w http.ResponseWriter, r *http.Request, u *user, params map[
 	} else {
 		w.Header().Add("Content-Type", "text/plain")
 		w.Header().Add("X-Task-State", state)
-		w.Write([]byte("Log in to see logs"))
+		w.Write(loginToSeeLogs[offset:])
 	}
 }
 
