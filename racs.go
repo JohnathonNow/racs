@@ -1524,22 +1524,22 @@ func handleProjectBuild(w http.ResponseWriter, r *http.Request, u *user, params 
 		return
 	}
 	stage := params["stage"]
+	requestedRef := ""
+	if params["payload"] != "" {
+		var j map[string]interface{}
+		json.Unmarshal([]byte(params["payload"]), &j)
+		requestedRef = fmt.Sprint(j["ref"])
+	} else if params["ref"] != "" {
+		requestedRef = params["ref"]
+	}
 	for _, p := range ps {
-		if p.protected && u.Name == "" {
-			w.WriteHeader(403)
-			w.Write([]byte("Unauthorized"))
-			return
-		}
 		expectedRef := fmt.Sprintf("refs/heads/%s", p.branch)
-		requestedRef := expectedRef
-		if params["payload"] != "" {
-			var j map[string]interface{}
-			json.Unmarshal([]byte(params["payload"]), &j)
-			requestedRef = fmt.Sprint(j["ref"])
-		} else if params["ref"] != "" {
-			requestedRef = params["ref"]
-		}
-		if requestedRef == expectedRef {
+		if requestedRef == expectedRef || requestedRef == "" {
+			if p.protected && u.Name == "" {
+				w.WriteHeader(403)
+				w.Write([]byte("Unauthorized"))
+				return
+			}
 			switch stage {
 			case "clean":
 				p.buildFrom(CLEANING, nil, true)
