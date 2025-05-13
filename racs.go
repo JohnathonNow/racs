@@ -386,7 +386,7 @@ func projectRoutine(p *project) {
 					command = "podman"
 					args = []string{"build",
 						"--build-arg-file", projectEnvironment(p, request),
-						"--pull=newer",
+						"--pull=always", // Work around podman issue https://github.com/containers/podman/issues/22845 "--pull=newer",
 						"--squash",
 						"-f", spec,
 						"-t", fmt.Sprintf("builder-%d", p.id),
@@ -431,7 +431,7 @@ func projectRoutine(p *project) {
 					}
 					args = []string{"build",
 						"--build-arg-file", projectEnvironment(p, request),
-						"--pull=newer",
+						"--pull=always", // Work around podman issue https://github.com/containers/podman/issues/22845 "--pull=newer",
 						"--layers",
 						fmt.Sprintf("--cache-ttl=%s", cache_ttl),
 						"-f", spec,
@@ -462,7 +462,7 @@ func projectRoutine(p *project) {
 					args = []string{"build",
 						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
 						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
-						"--pull=newer",
+						"--pull=always", // Work around podman issue https://github.com/containers/podman/issues/22845 "--pull=newer",
 						"--squash",
 						"-f", spec,
 						"-t", fmt.Sprintf("package-%d", p.id),
