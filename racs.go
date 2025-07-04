@@ -386,7 +386,7 @@ func projectRoutine(p *project) {
 					command = "podman"
 					args = []string{"build",
 						"--build-arg-file", projectEnvironment(p, request),
-						"--squash",
+						"--squash-all",
 						"-f", spec,
 						"-t", fmt.Sprintf("builder-%d", p.id),
 					}
@@ -464,7 +464,7 @@ func projectRoutine(p *project) {
 					args = []string{"build",
 						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
 						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
-						"--squash",
+						"--squash-all",
 						"-f", spec,
 						"-t", fmt.Sprintf("package-%d", p.id),
 					}
