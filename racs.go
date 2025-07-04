@@ -386,7 +386,7 @@ func projectRoutine(p *project) {
 					command = "podman"
 					args = []string{"build",
 						"--build-arg-file", projectEnvironment(p, request),
-						"--squash-all",
+						"--squash",
 						"-f", spec,
 						"-t", fmt.Sprintf("builder-%d", p.id),
 					}
@@ -433,7 +433,6 @@ func projectRoutine(p *project) {
 					args = []string{"build",
 						"--build-arg-file", projectEnvironment(p, request),
 						"--layers",
-						"--squash-all",
 						fmt.Sprintf("--cache-ttl=%s", cache_ttl),
 						"-f", spec,
 						"-t", fmt.Sprintf("prepackage-%d", p.id),
@@ -465,13 +464,9 @@ func projectRoutine(p *project) {
 					args = []string{"build",
 						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
 						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
+						"--squash",
 						"-f", spec,
 						"-t", fmt.Sprintf("package-%d", p.id),
-					}
-					if p.prepackageSpec == "" {
-						args = append(args, "--squash-all")
-					} else {
-						args = append(args, "--squash")
 					}
 					if p.packageDep != nil {
 						args = append(args, "--from", fmt.Sprintf("package-%d", p.packageDep.id))
