@@ -431,6 +431,8 @@ func projectRoutine(p *project) {
 						cache_ttl = "0"
 					}
 					args = []string{"build",
+						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
+						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
 						"--build-arg-file", projectEnvironment(p, request),
 						"--layers",
 						fmt.Sprintf("--cache-ttl=%s", cache_ttl),
@@ -464,6 +466,7 @@ func projectRoutine(p *project) {
 					args = []string{"build",
 						"-v", fmt.Sprintf("%s/%d/workspace:/workspace", projectAbs, p.id),
 						"-v", fmt.Sprintf("%s/%d/config:/config", projectAbs, p.id),
+						"--build-arg-file", projectEnvironment(p, request),
 						"--squash",
 						"-f", spec,
 						"-t", fmt.Sprintf("package-%d", p.id),
