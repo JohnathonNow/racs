@@ -34,7 +34,7 @@ CREATE TABLE projects(
 	buildHash BLOB,
 	labels STRING,
 	protected INTEGER,
-	tagRepo INTEGER
+	tag STRING
 );
 
 CREATE TABLE destinations(

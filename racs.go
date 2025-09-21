@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,7 +138,6 @@ type credential struct {
 type destination struct {
 	registry *registry
 	tag      string
-	tagRepo  bool
 }
 
 type trigger struct {
@@ -168,6 +168,7 @@ type project struct {
 	packageDep     *project
 	scanners       []*project
 	commit         string
+	tag            string
 }
 
 type broker struct {
@@ -531,17 +532,11 @@ func projectRoutine(p *project) {
 			if request.from == SCANNING {
 				command = "echo"
 				args = []string{"skipping tag"}
-			} else if request.index < len(p.destinations) {
-				destination := p.destinations[request.index]
-				if destination.tagRepo {
-					tag := strings.Replace(destination.tag, "$VERSION", strconv.Itoa(p.version), -1)
-					tag = tag[strings.LastIndex(tag, ":")+1:]
-					command = "git"
-					args = []string{"-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "push", "origin", tag}
-				} else {
-					command = "echo"
-					args = []string{"skipping tag"}
-				}
+			} else if p.tag != "" {
+				tag := strings.Replace(p.tag, "$VERSION", strconv.Itoa(p.version), -1)
+				tag = tag[strings.LastIndex(tag, ":")+1:]
+				command = "git"
+				args = []string{"-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "push", "origin", tag}
 			} else {
 				command = "echo"
 				args = []string{"skipping tag"}
@@ -774,7 +769,7 @@ func projectCreate(name, url, branch, labels string) *project {
 		make(chan taskRequest, 10),
 		make(map[*project]trigger),
 		make(map[string]*credential),
-		nil, nil, nil, make([]*project, 0), "",
+		nil, nil, nil, make([]*project, 0), "", "",
 	}
 	projects[p.id] = p
 	go projectRoutine(p)
@@ -850,7 +845,7 @@ func projectList() []map[string]interface{} {
 		destinations := make([]interface{}, 0)
 		for _, destination := range p.destinations {
 			destinations = append(destinations, []interface{}{
-				destination.registry.id, destination.tag, destination.tagRepo,
+				destination.registry.id, destination.tag,
 			})
 		}
 		triggers := make([]interface{}, 0)
@@ -881,6 +876,7 @@ func projectList() []map[string]interface{} {
 			"protected":      p.protected,
 			"triggers":       triggers,
 			"environment":    environment,
+			"tag":            p.tag,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -1068,18 +1064,29 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 	graph.SetConcentrate(true)
 	graph.SetRankSeparator(5)
 	graph.SetOverlap(false)
-	nodes := make(map[int]*cgraph.Node)
+	pnodes := make(map[int]*cgraph.Node)
+	crnodes := make(map[int]*cgraph.Node)
 	for _, p := range projects {
-		node, _ := graph.CreateNode(strconv.Itoa(p.id))
+		node, _ := graph.CreateNode(fmt.Sprintf("P%d", p.id))
 		node.SetLabel(p.name)
 		node.SetShape("box")
-		nodes[p.id] = node
+		pnodes[p.id] = node
+	}
+	for _, cr := range credentials {
+		node, _ := graph.CreateNode(fmt.Sprintf("CR%d", cr.id))
+		node.SetLabel(cr.description)
+		node.SetShape("ellipse")
+		crnodes[cr.id] = node
+		if cr.project > 0 {
+			tnode := pnodes[cr.project]
+			graph.CreateEdge("", tnode, node)
+		}
 	}
 	for _, p := range projects {
-		pnode := nodes[p.id]
+		pnode := pnodes[p.id]
 		for q, t := range p.triggers {
 			for s := range t.states {
-				tnode := nodes[q.id]
+				tnode := pnodes[q.id]
 				edge, _ := graph.CreateEdge("", pnode, tnode)
 				label := edge.Get("xlabel")
 				if label != "" {
@@ -1091,11 +1098,9 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			}
 		}
 		for name, cr := range p.credentials {
-			if cr.project > 0 {
-				tnode := nodes[cr.project]
-				edge, _ := graph.CreateEdge("", tnode, pnode)
-				edge.SetXLabel(fmt.Sprintf("%s", name))
-			}
+			crnode := crnodes[cr.id]
+			edge, _ := graph.CreateEdge("", crnode, pnode)
+			edge.SetXLabel(fmt.Sprintf("%s", name))
 		}
 	}
 
@@ -1156,7 +1161,7 @@ func projectUpdateEvent(p *project) {
 	destinations := make([]interface{}, 0)
 	for _, destination := range p.destinations {
 		destinations = append(destinations, []interface{}{
-			destination.registry.id, destination.tag, destination.tagRepo,
+			destination.registry.id, destination.tag,
 		})
 	}
 	triggers := make([]interface{}, 0)
@@ -1185,6 +1190,7 @@ func projectUpdateEvent(p *project) {
 		"protected":      p.protected,
 		"triggers":       triggers,
 		"environment":    environment,
+		"tag":            p.tag,
 	})
 }
 
@@ -1216,6 +1222,7 @@ func handleProjectUpdate(w http.ResponseWriter, r *http.Request, u *user, params
 		} else {
 			p.packageSpec = ""
 		}
+		p.tag = params["tag"]
 		p.protected = params["protected"] != ""
 		db.Exec(`UPDATE projects SET name = ?, labels = ?, source = ?, branch = ?, buildSpec = ?, prepackageSpec = ?, packageSpec = ?, protected = ? WHERE id = ?`,
 			p.name, p.labels, p.url, p.branch, p.buildSpec, p.prepackageSpec, p.packageSpec, p.protected, p.id)
@@ -1358,9 +1365,8 @@ func handleProjectDestinations(w http.ResponseWriter, r *http.Request, u *user, 
 		rid, _ := strconv.Atoi(destinations[i])
 		r := registries[rid]
 		tag := destinations[i+1]
-		tagRepo, _ := strconv.Atoi(destinations[i+2])
-		p.destinations = append(p.destinations, destination{r, tag, tagRepo == 1})
-		db.Exec(`INSERT INTO destinations(project, registry, tag, tagRepo) VALUES(?, ?, ?, ?)`, p.id, r.id, tag, tagRepo)
+		p.destinations = append(p.destinations, destination{r, tag})
+		db.Exec(`INSERT INTO destinations(project, registry, tag) VALUES(?, ?, ?)`, p.id, r.id, tag)
 	}
 	projectUpdateEvent(p)
 	redirect := params["redirect"]
@@ -1738,6 +1744,39 @@ func handleRegistryUpdate(w http.ResponseWriter, r *http.Request, u *user, param
 	}
 }
 
+func handleRegistryDelete(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
+	if checkLogin(u, "admin", w, "/registry/delete", params) {
+		return
+	}
+	id, _ := strconv.Atoi(params["id"])
+	registry := registries[id]
+	confirm := params["confirm"]
+	if confirm == "YES" {
+		rows, err := db.Query(`DELETE FROM destinations WHERE registry = ? RETURNING project`, id)
+		if err == nil {
+			for rows.Next() {
+				var id int
+				rows.Scan(&id)
+				p := projects[id]
+				p.destinations = slices.DeleteFunc(p.destinations, func(d destination) bool {
+					return d.registry == registry
+				})
+				projectUpdateEvent(p)
+			}
+		}
+		db.Exec(`DELETE FROM registries WHERE id = ?`, id)
+		delete(registries, id)
+	}
+	redirect := params["redirect"]
+	if len(redirect) > 0 {
+		w.Header().Add("Location", redirect)
+		w.WriteHeader(303)
+	} else {
+		w.WriteHeader(200)
+		w.Write([]byte("OK"))
+	}
+}
+
 func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
 	result := make([]map[string]interface{}, 0)
 	for id, cr := range credentials {
@@ -1804,6 +1843,43 @@ func handleCredentialUpdate(w http.ResponseWriter, r *http.Request, u *user, par
 }
 
 func handleCredentialDelete(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
+	if checkLogin(u, "admin", w, "/credential/delete", params) {
+		return
+	}
+	logger.Info("Here 1")
+	id, _ := strconv.Atoi(params["id"])
+	confirm := params["confirm"]
+	if confirm == "YES" {
+		logger.Info("Here 2")
+		rows, err := db.Query(`DELETE FROM environments WHERE credential = ? RETURNING project, name`, id)
+		logger.Info("Here 3")
+		if err == nil {
+			logger.Info("Here 4")
+			for rows.Next() {
+				logger.Info("Here 5")
+				var id int
+				var name string
+				rows.Scan(&id, &name)
+				p := projects[id]
+				delete(p.credentials, name)
+				projectUpdateEvent(p)
+			}
+		}
+		logger.Info("Here 5a")
+		db.Exec(`DELETE FROM credentials WHERE id = ?`, id)
+		logger.Info("Here 6")
+		delete(credentials, id)
+		logger.Info("Here 7")
+	}
+	logger.Info("Here 8")
+	redirect := params["redirect"]
+	if len(redirect) > 0 {
+		w.Header().Add("Location", redirect)
+		w.WriteHeader(303)
+	} else {
+		w.WriteHeader(200)
+		w.Write([]byte("OK"))
+	}
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, u *user, params map[string]string)
@@ -2000,7 +2076,7 @@ func main() {
 		cr := &credential{id, description, value, project, request, expiry}
 		credentials[cr.id] = cr
 	}
-	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected FROM projects`)
+	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tag FROM projects`)
 	for rows.Next() {
 		var id int
 		var name string
@@ -2014,7 +2090,8 @@ func main() {
 		var state string
 		var version int
 		var protected int
-		err := rows.Scan(&id, &name, &labels, &source, &branch, &buildSpec, &prepackageSpec, &packageSpec, &buildHash, &state, &version, &protected)
+		var tag string
+		err := rows.Scan(&id, &name, &labels, &source, &branch, &buildSpec, &prepackageSpec, &packageSpec, &buildHash, &state, &version, &protected, &tag)
 		if err != nil {
 			logger.Error(err)
 		}
@@ -2026,7 +2103,7 @@ func main() {
 			make(chan taskRequest, 10),
 			make(map[*project]trigger),
 			make(map[string]*credential),
-			nil, nil, nil, make([]*project, 0), "",
+			nil, nil, nil, make([]*project, 0), "", tag,
 		}
 		out, err := exec.Command("git", "-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "rev-parse", "HEAD").Output()
 		if err == nil {
@@ -2036,20 +2113,19 @@ func main() {
 		projects[p.id] = p
 		go projectRoutine(p)
 	}
-	rows, err = db.Query(`SELECT project, registry, tag, tagRepo FROM destinations`)
+	rows, err = db.Query(`SELECT project, registry, tag FROM destinations`)
 	for rows.Next() {
 		var pid int
 		var rid int
 		var tag string
-		var tagRepo int
-		err := rows.Scan(&pid, &rid, &tag, &tagRepo)
+		err := rows.Scan(&pid, &rid, &tag)
 		if err != nil {
 			logger.Error(err)
 		}
 		p := projects[pid]
 		r := registries[rid]
 		if p != nil && r != nil {
-			p.destinations = append(p.destinations, destination{r, tag, tagRepo == 1})
+			p.destinations = append(p.destinations, destination{r, tag})
 		}
 	}
 	rows, err = db.Query(`SELECT project, id, type, state, time FROM tasks ORDER BY id`)
@@ -2165,6 +2241,7 @@ func main() {
 	handlers["/registry/list"] = handleRegistryList
 	handlers["/registry/create"] = handleRegistryCreate
 	handlers["/registry/update"] = handleRegistryUpdate
+	handlers["/registry/delete"] = handleRegistryDelete
 	handlers["/credential/list"] = handleCredentialList
 	handlers["/credential/create"] = handleCredentialCreate
 	handlers["/credential/update"] = handleCredentialUpdate
