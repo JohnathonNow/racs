@@ -1846,17 +1846,12 @@ func handleCredentialDelete(w http.ResponseWriter, r *http.Request, u *user, par
 	if checkLogin(u, "admin", w, "/credential/delete", params) {
 		return
 	}
-	logger.Info("Here 1")
 	id, _ := strconv.Atoi(params["id"])
 	confirm := params["confirm"]
 	if confirm == "YES" {
-		logger.Info("Here 2")
 		rows, err := db.Query(`DELETE FROM environments WHERE credential = ? RETURNING project, name`, id)
-		logger.Info("Here 3")
 		if err == nil {
-			logger.Info("Here 4")
 			for rows.Next() {
-				logger.Info("Here 5")
 				var id int
 				var name string
 				rows.Scan(&id, &name)
@@ -1865,13 +1860,9 @@ func handleCredentialDelete(w http.ResponseWriter, r *http.Request, u *user, par
 				projectUpdateEvent(p)
 			}
 		}
-		logger.Info("Here 5a")
 		db.Exec(`DELETE FROM credentials WHERE id = ?`, id)
-		logger.Info("Here 6")
 		delete(credentials, id)
-		logger.Info("Here 7")
 	}
-	logger.Info("Here 8")
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
