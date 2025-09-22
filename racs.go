@@ -1758,10 +1758,12 @@ func handleRegistryDelete(w http.ResponseWriter, r *http.Request, u *user, param
 				var id int
 				rows.Scan(&id)
 				p := projects[id]
-				p.destinations = slices.DeleteFunc(p.destinations, func(d destination) bool {
-					return d.registry == registry
-				})
-				projectUpdateEvent(p)
+				if p != nil {
+					p.destinations = slices.DeleteFunc(p.destinations, func(d destination) bool {
+						return d.registry == registry
+					})
+					projectUpdateEvent(p)
+				}
 			}
 		}
 		db.Exec(`DELETE FROM registries WHERE id = ?`, id)
@@ -1856,8 +1858,10 @@ func handleCredentialDelete(w http.ResponseWriter, r *http.Request, u *user, par
 				var name string
 				rows.Scan(&id, &name)
 				p := projects[id]
-				delete(p.credentials, name)
-				projectUpdateEvent(p)
+				if p != nil {
+					delete(p.credentials, name)
+					projectUpdateEvent(p)
+				}
 			}
 		}
 		db.Exec(`DELETE FROM credentials WHERE id = ?`, id)
