@@ -294,7 +294,7 @@
 				project.destinations.forEach(destination => {
 					if (destination[0] == this.id) {
 						var row = create("tr",
-							create("td", create("span", `#${project.id}`)),
+							create("td", create("span", `Project #${project.id}`)),
 							create("td", create("span", project.name)),
 							create("td", create("span", `-> ${destination[1]}`))
 						);
@@ -304,7 +304,7 @@
 				for (var stage in project.sources) {
 					if (project.sources[stage] == this.id) {
 						var row = create("tr",
-							create("td", create("span", `#${project.id}`)),
+							create("td", create("span", `Project #${project.id}`)),
 							create("td", create("span", project.name)),
 							create("td", create("span", `${stage} ->`))
 						);

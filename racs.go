@@ -843,6 +843,17 @@ func projectDelete(p *project) {
 			}
 		}
 	}
+	rows, err := db.Query(`UPDATE credentials SET project = 0 WHERE project = ? RETURNING id`, p.id)
+	if err == nil {
+		for rows.Next() {
+			var id int
+			rows.Scan(&id)
+			cr := credentials[id]
+			if cr != nil {
+				cr.project = 0
+			}
+		}
+	}
 	db.Exec(`DELETE FROM projects WHERE id = ?`, p.id)
 	db.Exec(`DELETE FROM tasks WHERE project = ?`, p.id)
 	db.Exec(`DELETE FROM triggers WHERE project = ?`, p.id)
@@ -1951,6 +1962,17 @@ func handleCredentialDelete(w http.ResponseWriter, r *http.Request, u *user, par
 				if p != nil {
 					delete(p.credentials, name)
 					projectUpdateEvent(p)
+				}
+			}
+		}
+		rows, err = db.Query(`UPDATE registries SET credential = 0 WHERE credential = ? RETURNING id`, id)
+		if err == nil {
+			for rows.Next() {
+				var id int
+				rows.Scan(&id)
+				r := registries[id]
+				if r != nil {
+					r.credential = 0
 				}
 			}
 		}
