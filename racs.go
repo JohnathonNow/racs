@@ -264,7 +264,7 @@ func projectEnvironment(p *project, request taskRequest) string {
 var jobSemaphore *semaphore.Weighted
 var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
 
-func registryLoginBySpec(spec string) (bool, string) {
+func registryBySpec(spec string) *registry {
 	f, _ := os.Open(spec)
 	defer f.Close()
 	s := bufio.NewScanner(f)
@@ -273,16 +273,24 @@ func registryLoginBySpec(spec string) (bool, string) {
 		if from != nil {
 			for _, r := range registries {
 				if from[1] == r.url {
-					ok, msg := registryLogin(r)
-					if !ok {
-						return false, msg
-					}
-					return true, r.url
+					return r
 				}
 			}
 		}
 	}
-	return true, ""
+	return nil
+}
+
+func registryLoginBySpec(spec string) (bool, string) {
+	r := registryBySpec(spec)
+	if r == nil {
+		return true, ""
+	}
+	ok, msg := registryLogin(r)
+	if !ok {
+		return false, msg
+	}
+	return true, r.url
 }
 
 var projectStateMutex sync.Mutex
@@ -1066,20 +1074,37 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 	graph.SetOverlap(false)
 	pnodes := make(map[int]*cgraph.Node)
 	crnodes := make(map[int]*cgraph.Node)
+	rnodes := make(map[int]*cgraph.Node)
 	for _, p := range projects {
 		node, _ := graph.CreateNode(fmt.Sprintf("P%d", p.id))
-		node.SetLabel(p.name)
-		node.SetShape("box")
+		node.SetLabel(fmt.Sprintf("#%d %s", p.id, p.name))
+		node.SetStyle("filled")
+		node.SetShape("folder")
+		node.SetFillColor("#ff880022")
 		pnodes[p.id] = node
 	}
 	for _, cr := range credentials {
 		node, _ := graph.CreateNode(fmt.Sprintf("CR%d", cr.id))
 		node.SetLabel(cr.description)
-		node.SetShape("ellipse")
+		node.SetStyle("filled")
+		node.SetShape("note")
+		node.SetFillColor("#0044ff22")
 		crnodes[cr.id] = node
 		if cr.project > 0 {
 			tnode := pnodes[cr.project]
 			graph.CreateEdge("", tnode, node)
+		}
+	}
+	for _, r := range registries {
+		node, _ := graph.CreateNode(fmt.Sprintf("R%d", r.id))
+		node.SetLabel(r.name)
+		node.SetStyle("filled")
+		node.SetShape("box3d")
+		node.SetFillColor("#88ff0022")
+		rnodes[r.id] = node
+		if r.credential > 0 {
+			crnode := crnodes[r.credential]
+			graph.CreateEdge("", crnode, node)
 		}
 	}
 	for _, p := range projects {
@@ -1101,6 +1126,33 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			crnode := crnodes[cr.id]
 			edge, _ := graph.CreateEdge("", crnode, pnode)
 			edge.SetXLabel(fmt.Sprintf("%s", name))
+		}
+		for _, d := range p.destinations {
+			graph.CreateEdge("", pnode, rnodes[d.registry.id])
+		}
+		if p.buildSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
+				edge.SetXLabel("Build")
+			}
+		}
+		if p.prepackageSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
+				edge.SetXLabel("Prepackage")
+			}
+		}
+		if p.packageSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.packageSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
+				edge.SetXLabel("Package")
+			}
 		}
 	}
 
