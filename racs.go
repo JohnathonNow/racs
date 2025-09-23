@@ -1133,6 +1133,9 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 		rnodes[r.id] = node
 		if r.credential > 0 {
 			crnode := crnodes[r.credential]
+			if crnode == nil {
+				crnode, _ = graph.CreateNode(fmt.Sprintf("CR%d", cr.id))
+			}
 			graph.CreateEdge("", crnode, node)
 		}
 	}
