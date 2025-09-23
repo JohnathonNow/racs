@@ -159,6 +159,7 @@ type project struct {
 	version        int
 	protected      bool
 	destinations   []destination
+	sources        map[string]*registry
 	tasks          []*task
 	queue          chan taskRequest
 	triggers       map[*project]trigger
@@ -265,7 +266,10 @@ var jobSemaphore *semaphore.Weighted
 var fromPattern = regexp.MustCompile("^FROM ([^/]*).*$")
 
 func registryBySpec(spec string) *registry {
-	f, _ := os.Open(spec)
+	f, err := os.Open(spec)
+	if err != nil {
+		return nil
+	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
@@ -390,7 +394,14 @@ func projectRoutine(p *project) {
 		case PREPARING:
 			if p.buildSpec != "" {
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
-				ok, url := registryLoginBySpec(spec)
+				ok := true
+				url := ""
+				if r := registryBySpec(spec); r != nil {
+					p.sources["Build"] = r
+					ok, url = registryLogin(r)
+				} else {
+					delete(p.sources, "Build")
+				}
 				if ok {
 					command = "podman"
 					args = []string{"build",
@@ -432,7 +443,14 @@ func projectRoutine(p *project) {
 		case PREPACKAGING:
 			if p.prepackageSpec != "" {
 				spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
-				ok, url := registryLoginBySpec(spec)
+				ok := true
+				url := ""
+				if r := registryBySpec(spec); r != nil {
+					p.sources["Prepackage"] = r
+					ok, url = registryLogin(r)
+				} else {
+					delete(p.sources, "Prepackage")
+				}
 				if ok {
 					command = "podman"
 					cache_ttl := "24h"
@@ -468,7 +486,12 @@ func projectRoutine(p *project) {
 				ok := true
 				url := ""
 				if p.prepackageSpec == "" {
-					ok, url = registryLoginBySpec(spec)
+					if r := registryBySpec(spec); r != nil {
+						p.sources["Package"] = r
+						ok, url = registryLogin(r)
+					} else {
+						delete(p.sources, "Package")
+					}
 				}
 				if ok {
 					command = "podman"
@@ -773,6 +796,7 @@ func projectCreate(name, url, branch, labels string) *project {
 		"workspace/source/PackageSpec", []byte{},
 		CREATE_SUCCESS, 0, false,
 		make([]destination, 0),
+		make(map[string]*registry),
 		make([]*task, 0),
 		make(chan taskRequest, 10),
 		make(map[*project]trigger),
@@ -856,6 +880,10 @@ func projectList() []map[string]interface{} {
 				destination.registry.id, destination.tag,
 			})
 		}
+		sources := make(map[string]interface{}, 0)
+		for stage, registry := range p.sources {
+			sources[stage] = registry.id
+		}
 		triggers := make([]interface{}, 0)
 		for target, trigger := range p.triggers {
 			for state := range trigger.states {
@@ -875,6 +903,7 @@ func projectList() []map[string]interface{} {
 			"url":            p.url,
 			"branch":         p.branch,
 			"destinations":   destinations,
+			"sources":        sources,
 			"buildSpec":      p.buildSpec,
 			"prepackageSpec": p.prepackageSpec,
 			"packageSpec":    p.packageSpec,
@@ -1069,8 +1098,8 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 	graph, _ := gv.Graph(graphviz.Directed)
 	graph.SetRankDir("LR")
 	graph.SetSplines("polyline")
-	graph.SetConcentrate(true)
-	graph.SetRankSeparator(5)
+	//graph.SetConcentrate(true)
+	graph.SetRankSeparator(3)
 	graph.SetOverlap(false)
 	pnodes := make(map[int]*cgraph.Node)
 	crnodes := make(map[int]*cgraph.Node)
@@ -1079,15 +1108,15 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 		node, _ := graph.CreateNode(fmt.Sprintf("P%d", p.id))
 		node.SetLabel(fmt.Sprintf("#%d %s", p.id, p.name))
 		node.SetStyle("filled")
-		node.SetShape("folder")
-		node.SetFillColor("#ff880022")
+		node.SetShape("component")
+		node.SetFillColor("#ff440022")
 		pnodes[p.id] = node
 	}
 	for _, cr := range credentials {
 		node, _ := graph.CreateNode(fmt.Sprintf("CR%d", cr.id))
 		node.SetLabel(cr.description)
 		node.SetStyle("filled")
-		node.SetShape("note")
+		node.SetShape("signature")
 		node.SetFillColor("#0044ff22")
 		crnodes[cr.id] = node
 		if cr.project > 0 {
@@ -1099,8 +1128,8 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 		node, _ := graph.CreateNode(fmt.Sprintf("R%d", r.id))
 		node.SetLabel(r.name)
 		node.SetStyle("filled")
-		node.SetShape("box3d")
-		node.SetFillColor("#88ff0022")
+		node.SetShape("cylinder")
+		node.SetFillColor("#44ff0022")
 		rnodes[r.id] = node
 		if r.credential > 0 {
 			crnode := crnodes[r.credential]
@@ -1113,19 +1142,19 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			for s := range t.states {
 				tnode := pnodes[q.id]
 				edge, _ := graph.CreateEdge("", pnode, tnode)
-				label := edge.Get("xlabel")
+				label := edge.Get("label")
 				if label != "" {
-					label = fmt.Sprintf("%s, %s", label, s.String())
+					label = fmt.Sprintf("%s|%s", label, s.String())
 				} else {
 					label = s.String()
 				}
-				edge.SetXLabel(label)
+				edge.SetLabel(label)
 			}
 		}
 		for name, cr := range p.credentials {
 			crnode := crnodes[cr.id]
 			edge, _ := graph.CreateEdge("", crnode, pnode)
-			edge.SetXLabel(fmt.Sprintf("%s", name))
+			edge.SetLabel(fmt.Sprintf("%s", name))
 		}
 		for _, d := range p.destinations {
 			graph.CreateEdge("", pnode, rnodes[d.registry.id])
@@ -1135,7 +1164,7 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			r := registryBySpec(spec)
 			if r != nil {
 				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
-				edge.SetXLabel("Build")
+				edge.SetLabel("Build")
 			}
 		}
 		if p.prepackageSpec != "" {
@@ -1143,7 +1172,7 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			r := registryBySpec(spec)
 			if r != nil {
 				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
-				edge.SetXLabel("Prepackage")
+				edge.SetLabel("Prepackage")
 			}
 		}
 		if p.packageSpec != "" {
@@ -1151,7 +1180,7 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 			r := registryBySpec(spec)
 			if r != nil {
 				edge, _ := graph.CreateEdge("", rnodes[r.id], pnode)
-				edge.SetXLabel("Package")
+				edge.SetLabel("Package")
 			}
 		}
 	}
@@ -1216,6 +1245,11 @@ func projectUpdateEvent(p *project) {
 			destination.registry.id, destination.tag,
 		})
 	}
+
+	sources := make(map[string]interface{}, 0)
+	for stage, registry := range p.sources {
+		sources[stage] = registry.id
+	}
 	triggers := make([]interface{}, 0)
 	for target, trigger := range p.triggers {
 		for state := range trigger.states {
@@ -1236,6 +1270,7 @@ func projectUpdateEvent(p *project) {
 		"url":            p.url,
 		"branch":         p.branch,
 		"destinations":   destinations,
+		"sources":        sources,
 		"buildSpec":      p.buildSpec,
 		"prepackageSpec": p.prepackageSpec,
 		"packageSpec":    p.packageSpec,
@@ -2146,6 +2181,7 @@ func main() {
 			id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash,
 			states[state], version, protected == 1,
 			make([]destination, 0),
+			make(map[string]*registry),
 			make([]*task, 0),
 			make(chan taskRequest, 10),
 			make(map[*project]trigger),
@@ -2155,6 +2191,27 @@ func main() {
 		out, err := exec.Command("git", "-C", fmt.Sprintf("%s/%d/workspace/source", projectAbs, p.id), "rev-parse", "HEAD").Output()
 		if err == nil {
 			p.commit = strings.TrimSpace(string(out))
+		}
+		if p.buildSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.buildSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				p.sources["Build"] = r
+			}
+		}
+		if p.prepackageSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.prepackageSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				p.sources["Prepackage"] = r
+			}
+		}
+		if p.packageSpec != "" {
+			spec := fmt.Sprintf("%s/%d/%s", projectAbs, p.id, p.packageSpec)
+			r := registryBySpec(spec)
+			if r != nil {
+				p.sources["Package"] = r
+			}
 		}
 		//fmt.Printf("%+v\n", p)
 		projects[p.id] = p
