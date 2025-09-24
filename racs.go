@@ -207,7 +207,7 @@ func registryList() []map[string]interface{} {
 			"user":       r.user,
 			"credential": r.credential,
 			"timeout":    r.timeout,
-			"login":      r.login.Format(time.DateTime),
+			"login":      r.login.UnixMilli(),
 		})
 	}
 	return result
@@ -596,7 +596,7 @@ func projectRoutine(p *project) {
 				"project": p.id,
 				"id":      t.id,
 				"type":    t.kind.String(),
-				"time":    t.time.Format(time.DateTime),
+				"time":    t.time.UnixMilli(),
 				"state":   "QUEUED",
 			})
 			ctx := context.TODO()
@@ -882,7 +882,7 @@ func projectList() []map[string]interface{} {
 				"id":    t.id,
 				"type":  t.kind.String(),
 				"state": t.state,
-				"time":  t.time.Format(time.DateTime),
+				"time":  t.time.UnixMilli(),
 			})
 		}
 		destinations := make([]interface{}, 0)
@@ -1422,7 +1422,7 @@ func handleProjectConfigList(w http.ResponseWriter, r *http.Request, u *user, pa
 			files = append(files, map[string]interface{}{
 				"name": e.Name(),
 				"size": info.Size(),
-				"time": info.ModTime().Format(time.DateTime),
+				"time": info.ModTime().UnixMilli(),
 			})
 		}
 	}
@@ -1737,13 +1737,14 @@ func handleTaskList(w http.ResponseWriter, r *http.Request, u *user, params map[
 			var id int
 			var kind string
 			var state string
-			var time string
-			rows.Scan(&id, &kind, &state, &time)
+			var timeStr string
+			rows.Scan(&id, &kind, &state, &timeStr)
+			time, _ := time.Parse(time.DateTime, timeStr)
 			result = append(result, map[string]interface{}{
 				"id":    id,
 				"type":  kind,
 				"state": state,
-				"time":  time,
+				"time":  time.UnixMilli(),
 			})
 		}
 	} else {
@@ -1753,14 +1754,15 @@ func handleTaskList(w http.ResponseWriter, r *http.Request, u *user, params map[
 			var id int
 			var kind string
 			var state string
-			var time string
-			rows.Scan(&pid, &id, &kind, &state, &time)
+			var timeStr string
+			rows.Scan(&pid, &id, &kind, &state, &timeStr)
+			time, _ := time.Parse(time.DateTime, timeStr)
 			result = append(result, map[string]interface{}{
 				"project": pid,
 				"id":      id,
 				"type":    kind,
 				"state":   state,
-				"time":    time,
+				"time":    time.UnixMilli(),
 			})
 		}
 	}
@@ -1888,7 +1890,7 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 			"description": cr.description,
 			"project":     cr.project,
 			"request":     cr.request,
-			"expiry":      cr.expiry.Format(time.DateTime),
+			"expiry":      cr.expiry.UnixMilli(),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
