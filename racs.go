@@ -207,7 +207,7 @@ func registryList() []map[string]interface{} {
 			"user":       r.user,
 			"credential": r.credential,
 			"timeout":    r.timeout,
-			"login":      r.login.UnixMilli(),
+			"login":      r.login.Unix(),
 		})
 	}
 	return result
@@ -362,7 +362,7 @@ func credentialValue(cr *credential) string {
 				d, _ := str2duration.ParseDuration(duration)
 				cr.expiry = t.time.Add(d)
 			}
-			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Format(time.DateTime), cr.id)
+			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Unix(), cr.id)
 		} else {
 			return "<Error building project>"
 		}
@@ -581,7 +581,7 @@ func projectRoutine(p *project) {
 			var id int
 			now := time.Now()
 			err := db.QueryRow(`INSERT INTO tasks(project, type, state, time)
-				VALUES(?, ?, 'QUEUED', ?) RETURNING id`, p.id, p.state.String(), now.Format(time.DateTime)).Scan(&id)
+				VALUES(?, ?, 'QUEUED', ?) RETURNING id`, p.id, p.state.String(), now.Unix()).Scan(&id)
 			if err != nil {
 				logger.Fatal(err)
 			}
@@ -596,7 +596,7 @@ func projectRoutine(p *project) {
 				"project": p.id,
 				"id":      t.id,
 				"type":    t.kind.String(),
-				"time":    t.time.UnixMilli(),
+				"time":    t.time.Unix(),
 				"state":   "QUEUED",
 			})
 			ctx := context.TODO()
@@ -882,7 +882,7 @@ func projectList() []map[string]interface{} {
 				"id":    t.id,
 				"type":  t.kind.String(),
 				"state": t.state,
-				"time":  t.time.UnixMilli(),
+				"time":  t.time.Unix(),
 			})
 		}
 		destinations := make([]interface{}, 0)
@@ -1422,7 +1422,7 @@ func handleProjectConfigList(w http.ResponseWriter, r *http.Request, u *user, pa
 			files = append(files, map[string]interface{}{
 				"name": e.Name(),
 				"size": info.Size(),
-				"time": info.ModTime().UnixMilli(),
+				"time": info.ModTime().Unix(),
 			})
 		}
 	}
@@ -1737,14 +1737,13 @@ func handleTaskList(w http.ResponseWriter, r *http.Request, u *user, params map[
 			var id int
 			var kind string
 			var state string
-			var timeStr string
-			rows.Scan(&id, &kind, &state, &timeStr)
-			time, _ := time.Parse(time.DateTime, timeStr)
+			var time int64
+			rows.Scan(&id, &kind, &state, &time)
 			result = append(result, map[string]interface{}{
 				"id":    id,
 				"type":  kind,
 				"state": state,
-				"time":  time.UnixMilli(),
+				"time":  time,
 			})
 		}
 	} else {
@@ -1754,15 +1753,14 @@ func handleTaskList(w http.ResponseWriter, r *http.Request, u *user, params map[
 			var id int
 			var kind string
 			var state string
-			var timeStr string
-			rows.Scan(&pid, &id, &kind, &state, &timeStr)
-			time, _ := time.Parse(time.DateTime, timeStr)
+			var time int64
+			rows.Scan(&pid, &id, &kind, &state, &time)
 			result = append(result, map[string]interface{}{
 				"project": pid,
 				"id":      id,
 				"type":    kind,
 				"state":   state,
-				"time":    time.UnixMilli(),
+				"time":    time,
 			})
 		}
 	}
@@ -1890,7 +1888,7 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 			"description": cr.description,
 			"project":     cr.project,
 			"request":     cr.request,
-			"expiry":      cr.expiry.UnixMilli(),
+			"expiry":      cr.expiry.Unix(),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -2176,13 +2174,9 @@ func main() {
 		var value string
 		var project int
 		var request string
-		var expiryStr string
-		rows.Scan(&id, &description, &value, &project, &request, &expiryStr)
-		expiry, err := time.Parse(time.DateTime, expiryStr)
-		if err != nil {
-			expiry = time.Unix(0, 0)
-		}
-		cr := &credential{id, description, value, project, request, expiry}
+		var expiry int64
+		rows.Scan(&id, &description, &value, &project, &request, &expiry)
+		cr := &credential{id, description, value, project, request, time.Unix(expiry, 0)}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tag FROM projects`)
@@ -2265,12 +2259,11 @@ func main() {
 		var id int
 		var kind string
 		var state string
-		var timeStr string
-		rows.Scan(&pid, &id, &kind, &state, &timeStr)
+		var timeval int64
+		rows.Scan(&pid, &id, &kind, &state, &timeval)
 		p := projects[pid]
 		if p != nil {
-			timeVal, _ := time.Parse(time.DateTime, timeStr)
-			p.tasks = append(p.tasks, &task{id, states[kind], state, timeVal})
+			p.tasks = append(p.tasks, &task{id, states[kind], state, time.Unix(timeval, 0)})
 			if len(p.tasks) > 10 {
 				p.tasks = p.tasks[1:]
 			}

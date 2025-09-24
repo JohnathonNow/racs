@@ -721,7 +721,7 @@
 							task.state.addClass("has-text-warning");
 							break;
 						}
-						var time = DateTime.fromMillis(result.time);
+						var time = DateTime.fromSeconds(result.time);
 						task.box = create("div.task", {"on-click": showTaskLogs.bind(result)},
 							create("span.state", task.state),
 							create("span.type", result.type),
@@ -1053,7 +1053,7 @@
 				task = tasks[result.id] = {};
 				task.icon = create("i");
 				task.state = create("span.icon", task.icon);
-				var time = DateTime.fromMillis(result.time);
+				var time = DateTime.fromSeconds(result.time);
 				task.box = create("div.task", {"on-click": showTaskLogs.bind(result)},
 					create("span.state", task.state),
 					create("span.type", result.type),

@@ -355,7 +355,7 @@
 				task = tasks[result.id] = {};
 				task.icon = create("i");
 				task.state = create("span.icon", task.icon);
-				var time = DateTime.fromMillis(result.time);
+				var time = DateTime.fromSeconds(result.time);
 				task.box = create("div.task", {"on-click": showTaskLogs.bind(result)},
 					create("div.type", task.state, " ", result.type),
 					//create("div.id", "#", result.id.toString()),
