@@ -362,7 +362,7 @@ func credentialValue(cr *credential) string {
 				d, _ := str2duration.ParseDuration(duration)
 				cr.expiry = t.time.Add(d)
 			}
-			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, cr.value, cr.expiry.Unix(), cr.id)
+			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, credentialEncrypt(cr.value), cr.expiry.Unix(), cr.id)
 		} else {
 			return "<Error building project>"
 		}
@@ -1901,6 +1901,35 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 	w.Write(j)
 }
 
+var credentialCiph cipher.Block
+
+func credentialEncrypt(value string) string {
+	if value == "" {
+		return ""
+	}
+	gcm, _ := cipher.NewGCM(credentialCiph)
+	nonceSize := gcm.NonceSize()
+	nonce := make([]byte, nonceSize)
+	rand.Read(nonce)
+	en := gcm.Seal(nil, nonce, []byte(value), nil)
+	out := make([]byte, len(en)+nonceSize)
+	copy(out[:nonceSize], nonce)
+	copy(out[nonceSize:], en)
+	return hex.EncodeToString(out)
+}
+
+func credentialDecrypt(value string) string {
+	if value == "" {
+		return ""
+	}
+	gcm, _ := cipher.NewGCM(ciph)
+	nonceSize := gcm.NonceSize()
+	en, _ := hex.DecodeString(value)
+	nonce, in := en[:nonceSize], en[nonceSize:]
+	de, _ := gcm.Open(nil, nonce, in, nil)
+	return string(de)
+}
+
 func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
 	if checkLogin(u, "admin", w, "/credential/create", params) {
 		return
@@ -1910,7 +1939,7 @@ func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, par
 	project, _ := strconv.Atoi(params["project"])
 	request := params["request"]
 	var id int
-	db.QueryRow(`INSERT INTO credentials(description, value, project, request) VALUES(?, ?, ?, ?) RETURNING id`, description, value, project, request).Scan(&id)
+	db.QueryRow(`INSERT INTO credentials(description, value, project, request) VALUES(?, ?, ?, ?) RETURNING id`, description, credentialEncrypt(value), project, request).Scan(&id)
 	credentials[id] = &credential{id, description, value, project, request, time.Unix(0, 0)}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
@@ -1934,7 +1963,7 @@ func handleCredentialUpdate(w http.ResponseWriter, r *http.Request, u *user, par
 	cr.value = value
 	cr.project = project
 	cr.request = request
-	db.Exec(`UPDATE credentials SET value = ?, project = ?, request = ? WHERE id = ?`, value, project, request, id)
+	db.Exec(`UPDATE credentials SET value = ?, project = ?, request = ? WHERE id = ?`, credentialEncrypt(value), project, request, id)
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -2151,6 +2180,28 @@ func main() {
 		}
 	}
 
+	var credentialKey []byte
+	err = db.QueryRow(`SELECT value FROM config WHERE name = 'key'`).Scan(&credentialKey)
+	if err == sql.ErrNoRows {
+		credentialKey := make([]byte, 32)
+		rand.Read(credentialKey)
+		credentialCiph, _ = aes.NewCipher(credentialKey)
+		db.Exec(`INSERT INTO config VALUES('key', ?)`, credentialKey)
+		rows, _ := db.Query(`SELECT id, value FROM credentials`)
+		updates := make(map[int]string, 0)
+		for rows.Next() {
+			var id int
+			var value string
+			rows.Scan(&id, &value)
+			updates[id] = credentialEncrypt(value)
+		}
+		for id, enc := range updates {
+			db.Exec(`UPDATE credentials SET value = ? WHERE id = ?`, enc, id)
+		}
+	} else {
+		credentialCiph, _ = aes.NewCipher(credentialKey)
+	}
+
 	states := make(map[string]state)
 	for state := DELETING; state <= TAG_SUCCESS; state += 1 {
 		states[state.String()] = state
@@ -2176,7 +2227,7 @@ func main() {
 		var request string
 		var expiry int64
 		rows.Scan(&id, &description, &value, &project, &request, &expiry)
-		cr := &credential{id, description, value, project, request, time.Unix(expiry, 0)}
+		cr := &credential{id, description, credentialDecrypt(value), project, request, time.Unix(expiry, 0)}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tag FROM projects`)
