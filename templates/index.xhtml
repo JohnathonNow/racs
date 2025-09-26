@@ -8,6 +8,7 @@
 	<link rel="stylesheet" href="/css/tabler-icons.min.css"/>
 	<script src="/lib.js" type="text/javascript"/>
 	<script src="/ansi_up.js" type="text/javascript"/>
+	<script src="/luxon.min.js" type="text/javascript"/>
 	<link rel="apple-touch-icon" sizes="57x57" href="/apple-icon-57x57.png"/>
 	<link rel="apple-touch-icon" sizes="60x60" href="/apple-icon-60x60.png"/>
 	<link rel="apple-touch-icon" sizes="72x72" href="/apple-icon-72x72.png"/>
@@ -132,6 +133,20 @@
 
 		.modal-card-body {
 			height: 30em;
+		}
+
+		th.rotate {
+			height: 6.5em;
+			white-space: nowrap;
+		}
+
+		th.rotate > div {
+			transform: translate(-3px, 51px) rotate(270deg);
+			width: 20px;
+		}
+
+		th.rotate > div > div {
+			width: 6em;
 		}
 	</style>
 </head>
@@ -312,24 +327,24 @@
 						</div>
 						<div class="field is-horizontal">
 							<div class="field-label is-normal">
-								<label class="label">Protected</label>
+								<label class="label">Tag on Push</label>
 							</div>
 							<div class="field-body">
 								<div class="field">
 									<div class="control is-expanded">
-										<input class="checkbox" type="checkbox" name="protected" id="update_protected"/>
+										<input class="input" name="tag" id="update_tag"/>
 									</div>
 								</div>
 							</div>
 						</div>
 						<div class="field is-horizontal">
 							<div class="field-label is-normal">
-								<label class="label">Push Tag</label>
+								<label class="label">Protected</label>
 							</div>
 							<div class="field-body">
 								<div class="field">
 									<div class="control is-expanded">
-										<input class="checkbox" type="checkbox" name="tagRepo" id="update_tagRepo"/>
+										<input class="checkbox" type="checkbox" name="protected" id="update_protected"/>
 									</div>
 								</div>
 							</div>
@@ -406,6 +421,16 @@
 						<input type="hidden" name="id" id="trigger_id" value=""/>
 						<input type="hidden" name="triggers" id="trigger_triggers" value=""/>
 						<table class="table is-fullwidth">
+							<thead class="has-background-link" style="position:sticky;top:0;z-index:1000;">
+								<th style="vertical-align:bottom;">Project</th>
+								<th class="rotate"><div><div>Clean</div></div></th>
+								<th class="rotate"><div><div>Prepare</div></div></th>
+								<th class="rotate"><div><div>Pull</div></div></th>
+								<th class="rotate"><div><div>Build</div></div></th>
+								<th class="rotate"><div><div>Prepackage</div></div></th>
+								<th class="rotate"><div><div>Package</div></div></th>
+								<th class="rotate"><div><div>Scan</div></div></th>
+							</thead>
 							<tbody id="trigger_table"/>
 						</table>
 					</section>
@@ -562,11 +587,7 @@
 				<img src="/favicon-96x96.png"/>
 				<span class="is-size-4 ml-2 has-text-info has-text-weight-bold is-family-code">RACS</span>
 			</a>
-			<a class="navbar-item is-tab is-active" href="/">Projects</a>
-			<a class="navbar-item is-tab" href="/credentials.xhtml">Credentials</a>
-			<a class="navbar-item is-tab" href="/registries.xhtml">Registries</a>
-			<a class="navbar-item is-tab" href="/tasks.xhtml">Tasks</a>
-			<a class="navbar-item is-tab" href="/graph.xhtml">Graph</a>
+			{{template "navigation.xhtml" "projects"}}
 			<a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" id="navbar-burger">
 				<span aria-hidden="true"></span>
 				<span aria-hidden="true"></span>
@@ -611,6 +632,7 @@
 		<div id="projects"/>
 	</div>
 	<script type="text/javascript">
+		const DateTime = luxon.DateTime;
 		let burger = document.getElementById("navbar-burger");
 		burger.onclick = function(event) {
 			let menu = document.getElementById("navbar-menu");
@@ -677,6 +699,10 @@
 						task.icon = create("i.fa");
 						task.state = create("span.icon", task.icon);
 						switch (result.state) {
+						case "QUEUED":
+							task.icon.addClass("fa-hourglass-start");
+							task.state.addClass("has-text-grey");
+							break;
 						case "RUNNING":
 							task.icon.addClass("fa-cog");
 							task.icon.addClass("fa-spin");
@@ -695,11 +721,11 @@
 							task.state.addClass("has-text-warning");
 							break;
 						}
-						var time = result.time.split(" ");
+						var time = DateTime.fromSeconds(result.time);
 						task.box = create("div.task", {"on-click": showTaskLogs.bind(result)},
 							create("span.state", task.state),
 							create("span.type", result.type),
-							create("span.time", time[0], " ", time[1], " ")
+							create("span.time", time.toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS))
 						);
 						list.appendChild(task.box);
 					});
@@ -730,8 +756,8 @@
 			document.getElementById("update_buildSpec").value = this.buildSpec;
 			document.getElementById("update_prepackageSpec").value = this.prepackageSpec;
 			document.getElementById("update_packageSpec").value = this.packageSpec;
+			document.getElementById("update_tag").value = this.tag;
 			document.getElementById("update_protected").checked = this.protected;
-			document.getElementById("update_tagRepo").checked = this.tagRepo;
 			document.getElementById("upload_id").value = this.id;
 			document.getElementById("destination_id").value = this.id;
 			document.getElementById("trigger_id").value = this.id;
@@ -740,7 +766,7 @@
 			var destinations = document.getElementById("destination_table");
 			while (destinations.firstChild) destinations.removeChild(destinations.firstChild);
 			this.destinations.forEach(destination => {
-				addDestination(destination[0].toString(), destination[1]);
+				addDestination(destination[0].toString(), destination[1], destination[2]);
 			});
 			var triggers = document.getElementById("trigger_table");
 			while (triggers.firstChild) triggers.removeChild(triggers.firstChild);
@@ -791,13 +817,13 @@
 			}
 		}
 
-		function addDestination(registry, tag) {
+		function addDestination(registry, tag, tagRepo) {
 			var destinations = document.getElementById("destination_table");
 			var registrySelect = create("select",
 				create("option", {value: ""}, "--- Registry ---"),
 				registries.map(registry => create("option", {value: registry.id.toString()}, registry.name))
 			);
-			var tagEntry = create("input.input");
+			var tagEntry = create("input.input", {value: "$VERSION"});
 			if (registry) registrySelect.value = registry.toString();
 			if (tag) tagEntry.value = tag;
 			var row = create("tr",
@@ -817,41 +843,46 @@
 			destinations.childNodes.forEach(child => {
 				if (child.children[0].children[0].children[0].value !== "") value.push([
 					child.children[0].children[0].children[0].value,
-					child.children[1].children[0].value
+					child.children[1].children[0].value || "$VERSION"
 				]);
 			});
 			document.getElementById("destination_destinations").value = value;
 		}
 
+		const triggerStates = ["clean", "prepare", "pull", "build", "prepackage", "package", "scan"];
+
 		function addTrigger(target, stage) {
 			var triggers = document.getElementById("trigger_table");
-			var targetSelect = create("select",
-				create("option", {value: ""}, "--- Project ---"),
-				projects.map((project, id) => create("option", {value: id}, project.name))
-			);
-			var stageSelect = create("select",
-				create("option", {value: "none"}, "--- Stage ---"),
-				create("option", {value: "clean"}, "Clean"),
-				create("option", {value: "clone"}, "Clone"),
-				create("option", {value: "prepare"}, "Prepare"),
-				create("option", {value: "pull"}, "Pull"),
-				create("option", {value: "build"}, "Build"),
-				create("option", {value: "prepackage"}, "Prepackage"),
-				create("option", {value: "package"}, "Package"),
-				create("option", {value: "scan"}, "Scan"),
-				create("option", {value: "push"}, "Push"),
-				create("option", {value: "tag"}, "Tag")
-			);
-			if (target) targetSelect.value = target;
-			if (stage) stageSelect.value = stage;
-			var row = create("tr",
-				create("td", create("div.select", targetSelect)),
-				create("td", create("div.select", stageSelect)),
-				create("td", create("span.button.is-danger", {"on-click": remove}, "Remove"))
-			);
-			triggers.appendChild(row);
-			function remove() {
-				triggers.removeChild(row);
+			var row = null;
+			if (target) triggers.childNodes.forEach(child => {
+				let project = child.children[0].children[0].children[0].value;
+				if (project == target) row = child;
+			});
+			if (!row) {
+				var targetSelect = create("select",
+					create("option", {value: ""}, "--- Project ---"),
+					projects.map((project, id) => create("option", {value: id}, project.name))
+				);
+				row = create("tr",
+					create("td", create("div.select", targetSelect)),
+					/*create("td", create("div.select", stageSelect)),
+					create("td", create("span.button.is-danger", {"on-click": remove}, "Remove")),*/
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"})),
+					create("td", create("input", {type: "checkbox"}))
+				);
+				triggers.appendChild(row);
+				function remove() {
+					triggers.removeChild(row);
+				}
+				if (target) targetSelect.value = target;
+			}
+			if (stage) {
+				row.children[triggerStates.indexOf(stage) + 1].children[0].checked = true;
 			}
 		}
 
@@ -859,10 +890,18 @@
 			var triggers = document.getElementById("trigger_table");
 			var value = [];
 			triggers.childNodes.forEach(child => {
-				if (child.children[0].children[0].children[0].value !== "") value.push([
+				let project = child.children[0].children[0].children[0].value;
+				if (project != "") {
+					triggerStates.forEach((state, i) => {
+						if (child.children[i + 1].children[0].checked) {
+							value.push([project, state]);
+						}
+					});
+				}
+				/*if (child.children[0].children[0].children[0].value !== "") value.push([
 					child.children[0].children[0].children[0].value,
 					child.children[1].children[0].children[0].value
-				]);
+				]);*/
 			});
 			document.getElementById("trigger_triggers").value = value;
 		}
@@ -943,6 +982,11 @@
 					tag.classList = "tag is-medium";
 					let stop_btn = document.getElementById("stop_btn");
 					switch (state) {
+					case "QUEUED":
+						tag.addClass("is-white");
+						stop_btn.classList.remove("is-block");
+						stop_btn.addClass("is-hidden");
+						break;
 					case "RUNNING":
 						tag.addClass("is-info");
 						stop_btn.classList.remove("is-hidden");
@@ -1009,11 +1053,11 @@
 				task = tasks[result.id] = {};
 				task.icon = create("i");
 				task.state = create("span.icon", task.icon);
-				var time = result.time.split(" ");
+				var time = DateTime.fromSeconds(result.time);
 				task.box = create("div.task", {"on-click": showTaskLogs.bind(result)},
 					create("span.state", task.state),
 					create("span.type", result.type),
-					create("span.time", time[0], " ", time[1], " ")
+					create("span.time", time.toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS))
 				);
 				project.tasks.appendChild(task.box);
 				while (project.tasks.children.length > 10) {
@@ -1031,6 +1075,11 @@
 			project.state.removeClass("is-danger");
 			project.state.removeClass("is-warning");
 			switch (result.state) {
+			case "QUEUED":
+				project.state.addClass("is-text");
+				task.icon.addClass("fa-hourglass-start");
+				task.state.addClass("has-text-grey");
+				break;
 			case "RUNNING":
 				project.state.addClass("is-info");
 				task.icon.addClass("fa-cog");
@@ -1059,7 +1108,7 @@
 
 		document.getElementById("name-filter").oninput = filterProjects;
 
-		var filter = JSON.parse(sessionStorage.getItem("filter") || "{}");
+		var filter = JSON.parse(localStorage.getItem("filter") || "{}");
 		var labels = {};
 
 		function labelTag(label) {
@@ -1112,7 +1161,7 @@
 			for (var label in labels) if (labels[label].checked) {
 				filterCount++;
 			}
-			sessionStorage.setItem("filter", JSON.stringify(filter));
+			localStorage.setItem("filter", JSON.stringify(filter));
 			var filterLabel = document.getElementById("filter-label");
 			if (filterCount > 0) {
 				filterLabel.textContent = `Filter (${filterCount})`;
@@ -1167,7 +1216,8 @@
 				project = projects[result.id] = {
 					state: create("progress.progress.has-border", {max: taskTypes.TAG_SUCCESS}),
 					tasks: create("div.tasks"),
-					version: create("span")
+					version: create("span"),
+					data: {}
 				};
 				project.name = result.name;
 				var buildSelect = create("select", {"on-change": build.bind(result)},
@@ -1209,10 +1259,11 @@
 				);
 				project.card.name = result.name.toLowerCase();
 				project.card.labels = labels;
-				name.onclick = showSettings.bind(result);
+				name.onclick = showSettings.bind(project.data);
 				container.appendChild(project.card);
 			}
 			for (var key in result) {
+				project.data[key] = result[key];
 				switch (key) {
 				case "state": {
 					/*project.state.textContent = result.state;
@@ -1282,6 +1333,7 @@
 				case "project/create":
 				case "project/state":
 				case "project/version":
+				case "project/update":
 					updateProject(event);
 					break;
 				case "task/create":

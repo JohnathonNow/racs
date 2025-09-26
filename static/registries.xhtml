@@ -7,6 +7,7 @@
 	<link rel="stylesheet" href="/css/all.min.css"/>
 	<script src="/lib.js" type="text/javascript"/>
 	<script src="/ansi_up.js" type="text/javascript"/>
+	<script src="/luxon.min.js" type="text/javascript"/>
 	<link rel="apple-touch-icon" sizes="57x57" href="/apple-icon-57x57.png"/>
 	<link rel="apple-touch-icon" sizes="60x60" href="/apple-icon-60x60.png"/>
 	<link rel="apple-touch-icon" sizes="72x72" href="/apple-icon-72x72.png"/>
@@ -24,6 +25,11 @@
 	<meta name="msapplication-TileColor" content="#ffffff"/>
 	<meta name="msapplication-TileImage" content="/ms-icon-144x144.png"/>
 	<meta name="theme-color" content="#ffffff"/>
+	<style>
+		.modal-card-body {
+			height: 33em;
+		}
+	</style>
 </head>
 <body class="has-background-warning-light" style="min-height:100vh;padding:0;">
 	<div class="modal" id="create">
@@ -54,9 +60,9 @@
 					</div>
 				</div>
 				<div class="field">
-					<label class="label">Password</label>
+					<label class="label">Credential</label>
 					<div class="control">
-						<input class="input" type="password" name="password"/>
+						<select class="select" name="password" id="create_credential"/>
 					</div>
 				</div>
 			</section>
@@ -69,51 +75,97 @@
 	</div>
 	<div class="modal" id="settings">
 		<div class="modal-background"/>
-		<form class="modal-card" action="/registry/update" method="POST">
+		<div class="modal-card">
 			<header class="modal-card-head">
-				<p class="modal-card-title">Update Registry</p>
-				<button class="delete" aria-label="close" onclick="hideCredentialSettings()" type="reset"/>
+				<p class="modal-card-title">
+					<div class="tabs is-centered is-toggle">
+						<ul id="registry_settings_tabs">
+							<li><a onclick="showSettingsTab(0)">Settings</a></li>
+							<li><a onclick="showSettingsTab(1)">Usage</a></li>
+							<li><a onclick="showSettingsTab(2)">Delete</a></li>
+						</ul>
+					</div>
+				</p>
+				<button class="delete" aria-label="close" onclick="hideSettings()" type="reset"/>
 			</header>
-			<section class="modal-card-body">
-				<input type="hidden" name="redirect" value="/registries.xhtml"/>
-				<input type="hidden" name="id" id="update_id" value=""/>
-				<div class="field">
-					<label class="label">Name</label>
-					<div class="control">
-						<input class="input" name="name" id="update_name"/>
-					</div>
+			<div id="registry_settings_container">
+				<form action="/registry/update" method="POST">
+					<section class="modal-card-body">
+						<input type="hidden" name="redirect" value="/registries.xhtml"/>
+						<input type="hidden" name="id" id="update_id" value=""/>
+						<div class="field">
+							<label class="label">Name</label>
+							<div class="control">
+								<input class="input" name="name" id="update_name"/>
+							</div>
+						</div>
+						<div class="field">
+							<label class="label">URL</label>
+							<div class="control">
+								<input class="input" name="url" id="update_url"/>
+							</div>
+						</div>
+						<div class="field">
+							<label class="label">User</label>
+							<div class="control">
+								<input class="input" name="user" id="update_user"/>
+							</div>
+						</div>
+						<div class="field">
+							<label class="label">Credential</label>
+							<div class="control">
+								<select class="select" name="credential" id="update_credential"/>
+							</div>
+						</div>
+						<div class="field">
+							<label class="label">Timeout</label>
+							<div class="control">
+								<input class="input" type="number" name="timeout" id="update_timeout"/>
+							</div>
+						</div>
+						<div class="field">
+							<label class="label">Login</label>
+							<div class="control">
+								<span id="update_login"/>
+							</div>
+						</div>
+					</section>
+					<footer class="modal-card-foot">
+						<span style="flex:1 1;"/>
+						<button class="button" onclick="hideSettings()" type="reset">Cancel</button>
+						<button class="button is-primary" type="submit">Update</button>
+					</footer>
+				</form>
+				<div>
+					<section class="modal-card-body">
+						<table class="table is-fullwidth">
+							<tbody id="uses_table"/>
+						</table>
+					</section>
+					<footer class="modal-card-foot">
+						<span style="flex:1 1;"/>
+						<button class="button" onclick="hideSettings()" type="reset">Cancel</button>
+					</footer>
 				</div>
-				<div class="field">
-					<label class="label">URL</label>
-					<div class="control">
-						<input class="input" name="url" id="update_url"/>
-					</div>
-				</div>
-				<div class="field">
-					<label class="label">User</label>
-					<div class="control">
-						<input class="input" name="user" id="update_user"/>
-					</div>
-				</div>
-				<div class="field">
-					<label class="label">Password</label>
-					<div class="control">
-						<input class="input" type="password" name="password" id="update_password"/>
-					</div>
-				</div>
-				<div class="field">
-					<label class="label">Timeout</label>
-					<div class="control">
-						<input class="input" type="number" name="timeout" id="update_timeout"/>
-					</div>
-				</div>
-			</section>
-			<footer class="modal-card-foot">
-				<span style="flex:1 1;"/>
-				<button class="button" onclick="hideSettings()" type="reset">Cancel</button>
-				<button class="button is-primary" type="submit">Update</button>
-			</footer>
-		</form>
+				<form action="/registry/delete" method="POST">
+					<section class="modal-card-body">
+						<input type="hidden" name="redirect" value="/registries.xhtml"/>
+						<input type="hidden" name="id" id="delete_id" value=""/>
+						<div class="field">
+							<label class="label">Type "YES" to confirm</label>
+							<div class="control">
+								<input class="input" name="confirm" id="delete_confirm"/>
+							</div>
+						</div>
+					</section>
+					<footer class="modal-card-foot">
+						<span style="flex:1 1;"/>
+						<button class="button" onclick="hideSettings()" type="reset">Cancel</button>
+						<button class="button is-danger" type="submit">Delete</button>
+					</footer>
+				</form>
+			</div>
+		</div>
 	</div>
 	<div class="modal" id="login">
 		<div class="modal-background"/>
@@ -169,6 +221,7 @@
 			<a class="navbar-item is-tab" href="/credentials.xhtml">Credentials</a>
 			<a class="navbar-item is-tab is-active" href="/registries.xhtml">Registries</a>
 			<a class="navbar-item is-tab" href="/tasks.xhtml">Tasks</a>
+			<a class="navbar-item is-tab" href="/graph.xhtml">Graph</a>
 			<a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" id="navbar-burger">
 				<span aria-hidden="true"></span>
 				<span aria-hidden="true"></span>
@@ -191,7 +244,7 @@
 			</div>
 		</div>
 	</nav>
-	<div style="display:flex;flex-wrap:wrap;" id="registries"/>
+	<table class="table" style="margin:auto;" id="registries"/>
 	<script type="text/javascript">
 		let burger = document.getElementById("navbar-burger");
 		burger.onclick = function(event) {
@@ -200,6 +253,10 @@
 			menu.classList.toggle("is-active");
 		}
 		function showCreate() {
+			var select = document.getElementById("create_credential");
+			select.removeChildren();
+			select.appendChild(create("option", {value: ""}, "--- Credential ---"));
+			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.description)));
 			var modal = document.getElementById("create");
 			modal.addClass("is-active");
 		}
@@ -209,15 +266,58 @@
 			modal.removeClass("is-active");
 		}
 
+		function showSettingsTab(index) {
+			var tabs = document.getElementById("registry_settings_tabs");
+			var container = document.getElementById("registry_settings_container");
+			for (var i = 0; i &lt; 3; ++i) {
+				tabs.children[i].removeClass("is-active");
+				container.children[i].style.display = "none";
+			}
+			tabs.children[index].addClass("is-active");
+			container.children[index].style.display = null;
+		}
+
 		function showSettings() {
 			document.getElementById("update_id").value = this.id;
 			document.getElementById("update_name").value = this.name;
 			document.getElementById("update_url").value = this.url;
 			document.getElementById("update_user").value = this.user;
-			document.getElementById("update_password").value = "";
+			var select = document.getElementById("update_credential");
+			select.removeChildren();
+			select.appendChild(create("option", {value: ""}, "--- Credential ---"));
+			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.description)));
+			select.value = (this.credential || "").toString();
 			document.getElementById("update_timeout").value = this.timeout;
+			document.getElementById("update_login").textContent = this.login;
+			var uses = document.getElementById("uses_table");
+			while (uses.firstChild) uses.removeChild(uses.firstChild);
+			projects.forEach(project => {
+				project.destinations.forEach(destination => {
+					if (destination[0] == this.id) {
+						var row = create("tr",
+							create("td", create("span", `Project #${project.id}`)),
+							create("td", create("span", project.name)),
+							create("td", create("span", `-> ${destination[1]}`))
+						);
+						uses.appendChild(row);
+					}
+				});
+				for (var stage in project.sources) {
+					if (project.sources[stage] == this.id) {
+						var row = create("tr",
+							create("td", create("span", `Project #${project.id}`)),
+							create("td", create("span", project.name)),
+							create("td", create("span", `${stage} ->`))
+						);
+						uses.appendChild(row);
+					}
+				}
+			});
+			document.getElementById("delete_id").value = this.id;
+			document.getElementById("delete_confirm").value = "";
 			var modal = document.getElementById("settings");
 			modal.addClass("is-active");
+			showSettingsTab(0);
 		}
 
 		function hideSettings() {
@@ -247,25 +347,35 @@
 		
 		var container = document.getElementById("registries");
 		var registries = [];
+		var credentials = [];
+		var projects = [];
 
 		function updateRegistry(result) {
 			var registry = registries[result.id];
 			if (!registry) {
 				registry = registries[result.id] = {};
 				registry.name = result.name;
-				var card = create("div.card.p-1.m-1.is-flex.is-flex-wrap-nowrap",
-					{style: "flex-grow: 1; flex-basis: 0;"},
-					create("span.is-flex-grow-1", {style: "display:inline-block"},
-						create("div.mb-2.has-text-weight-bold.is-size-6", result.name),
-						create("div",
-							create("button.button.is-small", {"on-click": showSettings.bind(result)},
-								create("span.icon", create("i.fas.fa-tools"))
-							)
+				var card = create("tr",
+					create("th", result.name),
+					create("td",
+						create("button.button.is-small", {"on-click": showSettings.bind(result)},
+							create("span.icon", create("i.fas.fa-tools"))
 						)
 					)
 				);
 				container.appendChild(card);
 			}
+		}
+
+		function updateProject(result) {
+			for (var i = 0; i &lt; projects.length; ++i) {
+				var project = projects[i];
+				if (project.id == result.id) {
+					for (var key in result) project[key] = result[key];
+					return;
+				}
+			}
+			projects.push(result);
 		}
 		
 		var events = null;
@@ -286,12 +396,13 @@
 				console.log(event);
 				switch (event.event) {
 				case "project/list":
-					//event.projects.forEach(updateProject);
+					event.projects.forEach(updateProject);
 					break;
 				case "project/create":
 				case "project/state":
 				case "project/version":
-					//updateProject(event);
+				case "project/update":
+					updateProject(event);
 					break;
 				case "task/create":
 				case "task/state": {
@@ -311,11 +422,14 @@
 		
 		function fetchConfig() {
 			fetch("/project/list").then(response => response.json()).then(results => {
-				//results.forEach(updateProject);
+				results.forEach(updateProject);
 			});
 			fetch("/registry/list").then(response => response.json()).then(results => {
 				results.forEach(updateRegistry);
 				if (events === null) connectEvents();
+			});
+			fetch("/credential/list").then(response => response.json()).then(results => {
+				credentials = results;
 			});
 		}
 		
