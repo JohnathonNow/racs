@@ -1017,7 +1017,7 @@
 					response.text().then(text => {
 						logs += text;
 						container.innerHTML = ansi_up.ansi_to_html(logs);
-						if (section.scrollHeight - section.scrollTop - section.clientHeight < 2) {
+						if (section.scrollHeight - section.scrollTop - section.clientHeight &lt; 2) {
 							section.scrollTop = section.scrollHeight;
 						}
 					});
