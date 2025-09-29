@@ -1922,7 +1922,7 @@ func credentialDecrypt(value string) string {
 	if value == "" {
 		return ""
 	}
-	gcm, _ := cipher.NewGCM(ciph)
+	gcm, _ := cipher.NewGCM(credentialCiph)
 	nonceSize := gcm.NonceSize()
 	en, _ := hex.DecodeString(value)
 	nonce, in := en[:nonceSize], en[nonceSize:]
