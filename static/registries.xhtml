@@ -378,19 +378,24 @@
 			projects.push(result);
 		}
 		
+		function updateUser(name) {
+			console.log("User = ", name);
+			window.user = name;
+			var inActions = document.getElementById("in-actions");
+			var outActions = document.getElementById("out-actions");
+			if (name) {
+				inActions.style.display = null;
+				outActions.style.display = "none";
+			} else {
+				inActions.style.display = "none";
+				outActions.style.display = null;
+			}
+		}
+		
 		var events = null;
-		var fetchInterval = setInterval(fetchConfig, 1000);
-		fetchConfig();
 
 		function connectEvents() {
 			events = new EventSource("/events");
-			events.onopen = function() {
-				console.log("Events opened, clearing interval");
-				if (fetchInterval !== null) {
-					clearInterval(fetchInterval);
-					fetchInterval = null;
-				}
-			}
 			events.onmessage = function(e) {
 				var event = JSON.parse(e.data);
 				console.log(event);
@@ -405,46 +410,21 @@
 					updateProject(event);
 					break;
 				case "task/create":
-				case "task/state": {
+				case "task/state":
 					//var project = projects[event.project];
 					//if (project) updateTask(project, event);
 					break;
-				}
-				}
-			}
-			events.onerror = function() {
-				events = null;
-				if (fetchInterval === null) {
-					fetchInterval = setInterval(fetchConfig, 1000);
+				case "registry/list":
+					event.registries.forEach(updateRegistry);
+					break;
+				case "user/current":
+					updateUser(event.user);
+					break;
 				}
 			}
 		}
-		
-		function fetchConfig() {
-			fetch("/project/list").then(response => response.json()).then(results => {
-				results.forEach(updateProject);
-			});
-			fetch("/registry/list").then(response => response.json()).then(results => {
-				results.forEach(updateRegistry);
-				if (events === null) connectEvents();
-			});
-			fetch("/credential/list").then(response => response.json()).then(results => {
-				credentials = results;
-			});
-		}
-		
-		fetch("/user/current").then(response => response.text()).then(name => {
-			console.log("User = ", name);
-			var inActions = document.getElementById("in-actions");
-			var outActions = document.getElementById("out-actions");
-			if (name) {
-				inActions.style.display = null;
-				outActions.style.display = "none";
-			} else {
-				inActions.style.display = "none";
-				outActions.style.display = null;
-			}
-		});		
+
+		connectEvents();
 	</script>
 </body>
 </html>

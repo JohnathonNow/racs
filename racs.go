@@ -1001,8 +1001,23 @@ func handleEvents(w http.ResponseWriter, r *http.Request, u *user, params map[st
 		clients.unregister <- events
 	}()
 	j, _ := json.Marshal(map[string]interface{}{
+		"event": "user/current",
+		"user":  u.Name,
+	})
+	fmt.Fprintf(w, "data: %s\n\n", j)
+	j, _ = json.Marshal(map[string]interface{}{
 		"event":    "project/list",
 		"projects": projectList(),
+	})
+	fmt.Fprintf(w, "data: %s\n\n", j)
+	j, _ = json.Marshal(map[string]interface{}{
+		"event":       "credential/list",
+		"credentials": credentialList(),
+	})
+	fmt.Fprintf(w, "data: %s\n\n", j)
+	j, _ = json.Marshal(map[string]interface{}{
+		"event":      "registry/list",
+		"registries": registryList(),
 	})
 	fmt.Fprintf(w, "data: %s\n\n", j)
 	flusher.Flush()
@@ -1880,7 +1895,7 @@ func handleRegistryDelete(w http.ResponseWriter, r *http.Request, u *user, param
 	}
 }
 
-func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
+func credentialList() []map[string]interface{} {
 	result := make([]map[string]interface{}, 0)
 	for id, cr := range credentials {
 		result = append(result, map[string]interface{}{
@@ -1896,8 +1911,12 @@ func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, param
 		bdesc := result[j]["description"].(string)
 		return adesc < bdesc
 	})
+	return result
+}
+
+func handleCredentialList(w http.ResponseWriter, r *http.Request, u *user, params map[string]string) {
 	w.Header().Add("Content-Type", "application/json")
-	j, _ := json.Marshal(result)
+	j, _ := json.Marshal(credentialList())
 	w.Write(j)
 }
 
