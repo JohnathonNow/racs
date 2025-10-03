@@ -49,7 +49,7 @@ CREATE TABLE tasks(
 	project INTEGER,
 	type STRING,
 	state STRING,
-	time STRING
+	time INTEGER
 );
 
 CREATE TABLE members(
@@ -66,11 +66,13 @@ CREATE TABLE triggers(
 
 CREATE TABLE credentials(
 	id INTEGER PRIMARY KEY,
+	name STRING,
 	description STRING,
 	value STRING,
 	project INTEGER,
 	request STRING,
-	expiry STRING
+	expiry INTEGER,
+	updated INTEGER
 );
 
 CREATE TABLE environments(

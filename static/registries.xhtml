@@ -256,7 +256,7 @@
 			var select = document.getElementById("create_credential");
 			select.removeChildren();
 			select.appendChild(create("option", {value: ""}, "--- Credential ---"));
-			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.description)));
+			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.name)));
 			var modal = document.getElementById("create");
 			modal.addClass("is-active");
 		}
@@ -285,7 +285,7 @@
 			var select = document.getElementById("update_credential");
 			select.removeChildren();
 			select.appendChild(create("option", {value: ""}, "--- Credential ---"));
-			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.description)));
+			select.appendChildren(credentials.map(credential => create("option", {value: credential.id}, credential.name)));
 			select.value = (this.credential || "").toString();
 			document.getElementById("update_timeout").value = this.timeout;
 			document.getElementById("update_login").textContent = this.login;

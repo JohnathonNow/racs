@@ -128,11 +128,13 @@ type taskRequest struct {
 
 type credential struct {
 	id          int
-	description string
+	name        string
 	value       string
 	project     int
 	request     string
 	expiry      time.Time
+	updated     time.Time
+	description string
 }
 
 type destination struct {
@@ -227,7 +229,7 @@ func registryLogin(r *registry) (bool, string) {
 	if time.Since(r.login).Minutes() > float64(r.timeout) {
 		if len(r.user) > 0 {
 			cr := credentials[r.credential]
-			logger.Infof("Logging into registry %s -> %s", r.url, cr.description)
+			logger.Infof("Logging into registry %s -> %s", r.url, cr.name)
 			out, err := exec.Command("podman", "login", r.url, "-u", r.user, "-p", credentialValue(cr)).CombinedOutput()
 			if err != nil {
 				return false, string(out)
@@ -329,7 +331,7 @@ func credentialValue(cr *credential) string {
 		p := projects[cr.project]
 		start := time.Now()
 		trigger := map[string]string{
-			"CREDENTIAL": cr.description,
+			"CREDENTIAL": cr.name,
 			"REQUEST":    cr.request,
 		}
 		p.buildFrom(PULLING, trigger, false)
@@ -362,7 +364,8 @@ func credentialValue(cr *credential) string {
 				d, _ := str2duration.ParseDuration(duration)
 				cr.expiry = t.time.Add(d)
 			}
-			db.Exec(`UPDATE credentials SET value = ?, expiry = ? WHERE id = ?`, credentialEncrypt(cr.value), cr.expiry.Unix(), cr.id)
+			now := time.Now()
+			db.Exec(`UPDATE credentials SET value = ?, expiry = ?, updated = ? WHERE id = ?`, credentialEncrypt(cr.value), cr.expiry.Unix(), now.Unix(), cr.id)
 		} else {
 			return "<Error building project>"
 		}
@@ -904,7 +907,7 @@ func projectList() []map[string]interface{} {
 		environment := make([]interface{}, 0)
 		for name, credential := range p.credentials {
 			environment = append(environment, []interface{}{
-				name, credential.id, credential.description,
+				name, credential.id, credential.name,
 			})
 		}
 		result = append(result, map[string]interface{}{
@@ -995,9 +998,9 @@ func handleEvents(w http.ResponseWriter, r *http.Request, u *user, params map[st
 	defer func() {
 		clients.unregister <- events
 	}()
-	notify := w.(http.CloseNotifier).CloseNotify()
+	ctx := r.Context()
 	go func() {
-		<-notify
+		<-ctx.Done()
 		clients.unregister <- events
 	}()
 	j, _ := json.Marshal(map[string]interface{}{
@@ -1140,7 +1143,7 @@ func handleProjectGraph(w http.ResponseWriter, r *http.Request, u *user, params 
 	}
 	for _, cr := range credentials {
 		node, _ := graph.CreateNode(fmt.Sprintf("CR%d", cr.id))
-		node.SetLabel(cr.description)
+		node.SetLabel(cr.name)
 		node.SetStyle("filled")
 		node.SetShape("signature")
 		node.SetFillColor("#0044ff22")
@@ -1288,7 +1291,7 @@ func projectUpdateEvent(p *project) {
 	environment := make([]interface{}, 0)
 	for name, credential := range p.credentials {
 		environment = append(environment, []interface{}{
-			name, credential.id, credential.description,
+			name, credential.id, credential.name,
 		})
 	}
 	event(map[string]interface{}{
@@ -1900,15 +1903,17 @@ func credentialList() []map[string]interface{} {
 	for id, cr := range credentials {
 		result = append(result, map[string]interface{}{
 			"id":          id,
-			"description": cr.description,
+			"name":        cr.name,
 			"project":     cr.project,
 			"request":     cr.request,
 			"expiry":      cr.expiry.Unix(),
+			"updated":     cr.updated.Unix(),
+			"description": cr.description,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
-		adesc := result[i]["description"].(string)
-		bdesc := result[j]["description"].(string)
+		adesc := result[i]["name"].(string)
+		bdesc := result[j]["name"].(string)
 		return adesc < bdesc
 	})
 	return result
@@ -1953,13 +1958,15 @@ func handleCredentialCreate(w http.ResponseWriter, r *http.Request, u *user, par
 	if checkLogin(u, "admin", w, "/credential/create", params) {
 		return
 	}
-	description := params["description"]
+	name := params["name"]
 	value := params["value"]
 	project, _ := strconv.Atoi(params["project"])
 	request := params["request"]
+	description := params["description"]
 	var id int
-	db.QueryRow(`INSERT INTO credentials(description, value, project, request) VALUES(?, ?, ?, ?) RETURNING id`, description, credentialEncrypt(value), project, request).Scan(&id)
-	credentials[id] = &credential{id, description, value, project, request, time.Unix(0, 0)}
+	now := time.Now()
+	db.QueryRow(`INSERT INTO credentials(name, value, project, request, updated, description) VALUES(?, ?, ?, ?, ?, ?) RETURNING id`, name, credentialEncrypt(value), project, request, now.Unix(), description).Scan(&id)
+	credentials[id] = &credential{id, name, value, project, request, time.Unix(0, 0), now, description}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -1975,14 +1982,23 @@ func handleCredentialUpdate(w http.ResponseWriter, r *http.Request, u *user, par
 		return
 	}
 	id, _ := strconv.Atoi(params["id"])
+	name := params["name"]
 	value := params["value"]
 	project, _ := strconv.Atoi(params["project"])
 	request := params["request"]
+	description := params["description"]
 	cr := credentials[id]
-	cr.value = value
+	cr.name = name
+	cr.description = description
 	cr.project = project
 	cr.request = request
-	db.Exec(`UPDATE credentials SET value = ?, project = ?, request = ? WHERE id = ?`, credentialEncrypt(value), project, request, id)
+	if cr.value != value {
+		cr.value = value
+		cr.updated = time.Now()
+		db.Exec(`UPDATE credentials SET name = ?, value = ?, project = ?, request = ?, updated = ?, description = ? WHERE id = ?`, name, credentialEncrypt(value), project, request, cr.updated.Unix(), description, id)
+	} else {
+		db.Exec(`UPDATE credentials SET name = ?, project = ?, request = ?, description = ? WHERE id = ?`, name, project, request, description, id)
+	}
 	redirect := params["redirect"]
 	if len(redirect) > 0 {
 		w.Header().Add("Location", redirect)
@@ -2237,16 +2253,19 @@ func main() {
 		rows.Scan(&id, &name, &url, &user, &credential, &timeout)
 		registries[id] = &registry{id, name, url, user, credential, time.Unix(0, 0), timeout}
 	}
-	rows, err = db.Query(`SELECT id, description, value, project, request, expiry FROM credentials`)
+	rows, err = db.Query(`SELECT id, name, description, value, project, request, expiry, updated FROM credentials`)
 	for rows.Next() {
 		var id int
+		var name string
 		var description string
 		var value string
 		var project int
 		var request string
 		var expiry int64
-		rows.Scan(&id, &description, &value, &project, &request, &expiry)
-		cr := &credential{id, description, credentialDecrypt(value), project, request, time.Unix(expiry, 0)}
+		var updated int64
+		rows.Scan(&id, &name, &description, &value, &project, &request, &expiry, &updated)
+		logger.Infof("Loading credential: %d: %s -> %s, %d", id, name, description, updated)
+		cr := &credential{id, name, credentialDecrypt(value), project, request, time.Unix(expiry, 0), time.Unix(updated, 0), description}
 		credentials[cr.id] = cr
 	}
 	rows, err = db.Query(`SELECT id, name, labels, source, branch, buildSpec, prepackageSpec, packageSpec, buildHash, state, version, protected, tag FROM projects`)
@@ -2389,11 +2408,14 @@ func main() {
 			select {
 			case client := <-clients.register:
 				clients.clients[client] = true
+				logger.Infof("Registering event listener: %s", client)
 			case client := <-clients.unregister:
 				delete(clients.clients, client)
+				logger.Infof("Unregistering event listener: %s", client)
 			case event := <-clients.events:
 				for client, _ := range clients.clients {
 					client <- event
+					logger.Infof("Sending event %s to listener: %s", event, client)
 				}
 			}
 		}

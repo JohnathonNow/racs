@@ -906,12 +906,12 @@
 			document.getElementById("trigger_triggers").value = value;
 		}
 
-		function addCredential(name, id, description) {
+		function addCredential(name, id) {
 			var environment = document.getElementById("environment_table");
 			var nameInput = create("input.input", {type: "text"});
 			var credentialSelect = create("select",
 				create("option", {value: ""}, "--- Credential ---"),
-				credentials.map(credential => create("option", {value: credential.id}, credential.description))
+				credentials.map(credential => create("option", {value: credential.id}, credential.name))
 			);
 			if (name) nameInput.value = name;
 			if (id) credentialSelect.value = id;
