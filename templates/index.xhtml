@@ -906,12 +906,12 @@
 			document.getElementById("trigger_triggers").value = value;
 		}
 
-		function addCredential(name, id, description) {
+		function addCredential(name, id) {
 			var environment = document.getElementById("environment_table");
 			var nameInput = create("input.input", {type: "text"});
 			var credentialSelect = create("select",
 				create("option", {value: ""}, "--- Credential ---"),
-				credentials.map(credential => create("option", {value: credential.id}, credential.description))
+				credentials.map(credential => create("option", {value: credential.id}, credential.name))
 			);
 			if (name) nameInput.value = name;
 			if (id) credentialSelect.value = id;
@@ -1017,7 +1017,9 @@
 					response.text().then(text => {
 						logs += text;
 						container.innerHTML = ansi_up.ansi_to_html(logs);
-						section.scrollTop = section.scrollHeight;
+						if (section.scrollHeight - section.scrollTop - section.clientHeight &lt; 2) {
+							section.scrollTop = section.scrollHeight;
+						}
 					});
 				});
 			}
@@ -1295,10 +1297,7 @@
 			registries[registry.id] = registry;
 		}
 
-		var events = null, fetchInterval = null;
-
-		fetch("/user/current").then(response => response.text()).then(name => {
-			console.log("User = ", name);
+		function updateUser(name) {
 			window.user = name;
 			var inActions = document.getElementById("in-actions");
 			var outActions = document.getElementById("out-actions");
@@ -1309,20 +1308,12 @@
 				inActions.style.display = "none";
 				outActions.style.display = null;
 			}
+		}
 
-			fetchInterval = setInterval(fetchConfig, 1000);
-			fetchConfig();
-		});
+		var events = null;
 
 		function connectEvents() {
 			events = new EventSource("/events");
-			events.onopen = function() {
-				console.log("Events opened, clearing interval");
-				if (fetchInterval !== null) {
-					clearInterval(fetchInterval);
-					fetchInterval = null;
-				}
-			}
 			events.onmessage = function(e) {
 				var event = JSON.parse(e.data);
 				console.log(event);
@@ -1342,28 +1333,20 @@
 					if (project) updateTask(project, event);
 					break;
 				}
-				}
-			}
-			events.onerror = function() {
-				events = null;
-				if (fetchInterval === null) {
-					fetchInterval = setInterval(fetchConfig, 1000);
+				case "credential/list":
+					credentials = event.credentials;
+					break;
+				case "registry/list":
+					event.registries.forEach(updateRegistry);
+					break;
+				case "user/current":
+					updateUser(event.user);
+					break;
 				}
 			}
 		}
 
-		function fetchConfig() {
-			fetch("/project/list").then(response => response.json()).then(results => {
-				results.forEach(updateProject);
-				if (events === null) connectEvents();
-			});
-			fetch("/registry/list").then(response => response.json()).then(results => {
-				results.forEach(updateRegistry);
-			});
-			fetch("/credential/list").then(response => response.json()).then(results => {
-				credentials = results;
-			});
-		}
+		connectEvents();
 	</script>
 </body>
 </html>
