@@ -414,6 +414,9 @@
 					//var project = projects[event.project];
 					//if (project) updateTask(project, event);
 					break;
+				case "credential/list":
+					credentials = event.credentials;
+					break;
 				case "registry/list":
 					event.registries.forEach(updateRegistry);
 					break;
